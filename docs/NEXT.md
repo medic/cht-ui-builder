@@ -53,6 +53,41 @@ their work.
 > **Items 1–5 and F are DONE.** Start at **P1-DEPLOY** below, then **A**. Original numbering
 > kept so older notes still line up.
 
+**P1-LOCALE-SEAT. 🔴 REGRESSION in `8eda602` (item F) — typed choice labels are silently dropped on imported configs.** *(~15 lines in one guarded branch — do this FIRST: it is a regression already on `origin` that can silently blank labels on a live production form)*
+
+**Root cause — two lines disagreeing about which sheet they mean.** The picker is fed `form.surveyHeaders.labelLocales` (`FormEditor.tsx:1415-1419`) and packs one label per **survey** locale (`QuestionTypePicker.tsx:254-258`); the seat iterates `form.choicesHeaders.labelLocales` (`FormEditor.tsx:964-975`). Every typed key the **choices** sheet doesn't declare is dropped silently; every declared key the picker didn't collect is materialised as `''`.
+
+Independently reproduced end-to-end (parse → picker → seat → serialize → re-read from disk bytes → **pyxform compile**):
+
+| | Shape | Result | Regression? |
+|---|---|---|---|
+| **A** | choices sheet declares fewer locales | typed `{en,ne}` seats as `{"en":…}`; Nepali unreachable in the Choices *and* Translate tabs (both render from `choicesHeaders.labelLocales`) | **No** — parent produced the same XForm. It's a **false affordance**: the picker renders a `label::ne` input that goes nowhere. **0 of 249 real forms** — latent, not live. |
+| **B** | choices sheet uses a **bare `label`** header (→ sentinel `'_'`, `parse.ts:281`) | seats `{"_":""}` → on disk `["list","weak",""]` → re-parses `{}`. XForm: `<item><name>weak</name></item>`, **no label in any language**. Parent emitted `<label>Weak</label>`. | **YES, genuine.** **11 real forms**, all with choice lists. |
+
+**Two corrections to QA's framing:** B is **broader** — it also fires on a plain **monolingual** form (survey `label::en` + choices bare) and in the mirror direction; and **narrower** — a **fully**-bare form (both sheets bare) works correctly today and must keep working. Only the **mixed** shape breaks. **Locale-order mismatch is REFUTED** — labels are keyed, not positional; 13 real forms have reordered columns and all round-trip intact.
+
+**Why this outranks a 4.4% hit rate:** it fires only on **imported real configs**, never on tool-created ones — i.e. aimed exactly at our moat. **One of the 11 is total loss:** `config-nssd/chis/forms/app/pregnancy_surveillance_form.xlsx`, a git-tracked **live NSSD production form with 90 choice rows across 14 lists** — the likeliest candidate anywhere for a 15th list. The other 10 lose only `en` (and post-commit still seat six genuine locales where the parent seated one). And **our own `cht-default` template ships 3 mismatched forms** (`templates.ts:73-82,147` is a verbatim `copyDir`), so a wizard-created project can inherit the trap on day one. Nothing catches it downstream: pyxform only **warns**, `errorPatterns.ts` classifies no warnings at all, and `preflight/rules/selectChoices.ts:23-35` counts rows, never labels — so blank choice labels reach CHW devices.
+
+**KEEP AND FIX — do not revert.** On the aligned shape (235/249 forms, 100% of tool-created) item F is a real win: QA's at-scale run authored 16 bilingual lists inline, 39/39 Nepali labels on disk.
+
+### Fix spec
+**(a) Seat the sentinel-safe union** at `FormEditor.tsx:964-975`: union `choicesHeaders.labelLocales` with every key the picker typed, **existing columns first** (deterministic append), then keep `labels[loc] = c.labels[loc] ?? ''`. Filter `'_'` out of the union **unless it is all we have** (the fully-bare form, which must stay a no-op).
+**(b) Extend `choicesHeaders.labelLocales` in the SAME `patch()`** — append-only, preserving order; mirror `addLocale` (`:1276-1283`). **QA's proposal misses this**, and without it the Nepali reaches disk but stays **invisible in-session**, because the Choices tab (`:3653`, `:3668`) and Translate tab (`:3772`, `:3901`, `:3912`) both render from that array. **Never remove `'_'`** from it.
+**(c) NEVER map a real locale onto `'_'`.** The intuitive "put the default locale in the bare `label` column" refinement is **a new data-loss bug**, proven against pyxform 4.5.0: without `default_language` it emits a third pseudo-language `lang="default"`; with `default_language: ne` and `label::ne` present the bare value is **silently discarded**.
+**(d) The leftover bare `label` column is harmless — this is the load-bearing fact that makes (a) safe.** pyxform resolves label columns **per LIST, not per sheet**: on the exact naive-union artifact (`[list_name, name, label, label::en, label::ne]`) it converts with **zero warnings**, the pre-existing list keeps its static `<label>`, and the new list gets proper itext in both languages. **Do not migrate the old bare cells** — that would regress them to `-` in Nepali.
+**(e) Column ordering:** new `label::xx` lands at the tail. Accept it. **Do not splice `choicesHeaders.ordered`** — reordering existing on-disk columns breaks the invariant for real.
+**(f) Byte-stability is provably safe:** the union is identical to today's seat whenever the sheets agree, identical on a fully-bare form, and the whole block is guarded by `commit.list && …length > 0` (`:960`).
+**(g) One-line belt:** re-apply the picker's drop rule *after* seating so a draft whose only content was a dropped locale can't land as a blank `opt_N` phantom.
+
+### Tests — the structural change matters more than the cases
+**Extract the seat out of `FormEditor.tsx` into `shared/src/xlsform/choiceLabelSeat.ts`** as a pure `seatChoiceLabels(typed, choicesLocales, surveyLocales)`. **This is the single most important change:** the defect lives in client code with no unit seam, and `c.labels[loc]` typechecks fine as a `Record` index — which is exactly why 625/625 green and clean typecheck were *structurally incapable* of seeing it. Then:
+1. `choiceLabelSeat.test.ts` — full matrix with exact expected `Record` per case: aligned · A · choices-superset · **B mixed** · **B mirror** · fully-bare (no-op) · reversed order.
+2. `serialize.roundtrip.test.ts` — bare-label sheet is a byte no-op (header stays exactly `label`, never `label::_`); seating a real locale appends `label::xx` while pre-existing bare cells stay byte-identical; extras keep their original column positions; two successive adds produce no duplicate columns.
+3. `client/tests/choice-locale-mismatch.spec.ts` + **two new non-canonical fixtures** (`mismatch-config`, `bare-label-config` with a pre-existing populated list). **Fixture workbooks must be written with a raw xlsx writer, never by our own `serializeXlsForm`** — it canonicalises `label` → `label::en`, which is why the only committed fixture (`mini-config`, aligned on both sheets) could not observe either scenario. Assert the full cell grid, not `toBeTruthy()`.
+4. **`server/templates` symmetry guard** — every shipped template `.xlsx` must lose nothing through the seat. Catches cht-default's 3 forms and stops future drift.
+5. **New preflight rule** `choiceLabels` — every choice row in a referenced list carries ≥1 non-empty label. Must fail on the Scenario-B artifact and the `opt_1` phantom.
+6. Tighten the §F leg (`geriatric-blockers.spec.ts:284-292`) — assert the row `type` and filter choices by `list_name`; today it matches across all lists, so a wrong-list landing passes silently.
+
 **P1-DEPLOY. 🔴 "Insert contact field" emits a form that FAILS `cht convert`.** *(top priority —
 the only thing between the geriatric build and fully no-code)*
 Found by QA on a **live deploy** to a real CHT instance, invisible to every on-disk check.
@@ -252,6 +287,17 @@ tool at an **existing** hand-written config.
 - **A4.** Add `server/templates/malaria/tasks.js` + a cht-default helper body as
   byte-stability fixtures. **A5.** Parenthesize the third join (`appliesIfParser.ts:777`).
   **A6.** Fix `DecisionsView.tsx:471-472` rendering conditions inverted on the sign-off screen.
+
+## Filed separately from the item-F review (2026-08-08)
+- **🔴 HIGH, pre-existing (originates `4583de2`, byte-identical at `c5d8508` — NOT from item F): re-typing a row to `select_one`/`select_multiple` with a new list discards the authored choices AND leaves a dangling reference.** `FormEditor.tsx:845-863` patches only `type` + `extras` and returns — `commit.list` is never read — yet `QuestionTypePicker.tsx:227-231` still routes the edit flow through the choices grid. Result: `select_one <newlist>` pointing at **zero rows**, no dangling-list validator anywhere in the tree, recovery only behind "show advanced". QA rated this P2; it's high.
+- **MEDIUM: no preflight rule for empty choice labels, and `errorPatterns.ts` classifies no pyxform *warnings* at all** — which is why the Scenario-B corruption stayed silent all the way to devices.
+- **MEDIUM: the `label::_` phantom header becomes an active trap after the fix** — `FormEditor.tsx:3653` renders `<th>label::{loc}</th>` literally, so bare-label forms already show a `label::_` column; once a real `label::en` sits beside it pyxform lets `label::en` win and silently discards anything typed into `_`. Render `'_'` as `label` and make it read-only when a real locale column exists.
+- **LOW:** list-name collision guard is blind to survey-referenced-but-empty lists (`existingListNames` from `form.choices` only) · choice grid overflows at exactly **4** locales (measured: tracks pin at 177px min-content, ✕ 17px outside the card — fix with `minmax(0, 2fr)` + `min-width: 0`) · `opt_${i+1}` fallback isn't collision-checked against typed names · **Enter-to-add-row is a dead key for bilingual authors** (guard requires the *last* locale column and nothing focuses the new row — the commit message oversells it).
+
+## Standing process rule added 2026-08-08 (after the fourth green-tests/broken-reality case)
+1. **Cross-sheet or cross-locale logic must live in `shared/` as an exported pure function**, never inline in a React handler. `8eda602` was untestable *by construction*.
+2. **Stand up a hostile fixture corpus** — `shared/src/xlsform/fixtures/noncanonical/`: bare `label` on choices only, bare on both, legacy `label:ne`, survey-superset locales, extras interleaved between label columns. Workbooks written by a **raw xlsx writer**, never by our own serializer. Add `pnpm test:hostile` and name it in the Gates line of any commit touching parse/serialize/seat.
+3. **The Gates line must name a spec that actually executes the changed lines.** `8eda602` credited `poc-build` and `condition-builder`, neither of which contains a single `.qtype-` selector or ever reaches the configure-list step. The no-regression claim was fine; the *attribution* is how a coverage gap reads as coverage.
 
 ## Housekeeping
 Wire the server tests (72) into CI; triage the 8 pre-existing failing browser specs (expect
