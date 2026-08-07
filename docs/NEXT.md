@@ -50,7 +50,43 @@ their work.
 
 ## The geriatric list — easiest to hardest
 
-> **Items 1–5 are DONE.** Start at **A**. Original numbering kept so older notes still line up.
+> **Items 1–5 and F are DONE.** Start at **P1-DEPLOY** below, then **A**. Original numbering
+> kept so older notes still line up.
+
+**P1-DEPLOY. 🔴 "Insert contact field" emits a form that FAILS `cht convert`.** *(top priority —
+the only thing between the geriatric build and fully no-code)*
+Found by QA on a **live deploy** to a real CHT instance, invisible to every on-disk check.
+The tool's own **+ insert → patient_name** creates the harvest `calculate` referencing
+`../inputs/contact/patient_name`, but **never declares that node inside the `inputs/contact`
+group** — so pyxform can't resolve the XPath and validation fails. A no-code user hits a wall
+they cannot diagnose or fix. QA's manual repair was: declare the hidden input node, and rename
+the calc.
+**Three parts to the fix:**
+1. **Generator** (`shared/src/xlsform/insertContactFieldRef.ts`) — when inserting a contact
+   field, also add the corresponding node inside the `inputs/contact` group if it isn't already
+   declared. Same edit, same undo.
+2. **Preflight has a hole that whitelists this exact defect.** `danglingRefs.ts` treats any
+   `../inputs/*` / `../inputs/contact/*` path as valid by assumption ("the runtime injects it").
+   It doesn't — the node must be declared. → Validate those paths against the form's actual
+   `inputs` block instead of waving them through.
+3. **Raise the test bar** — see the process note below.
+
+> **⚠️ Process lesson (third instance of the same pattern).** This feature **passed our audit
+> with 9 flow tests** — structural balance, idempotence, round-trip, rename-lockstep — and every
+> one of them passed while the output was undeployable, because none of them ran the converter.
+> Same shape as the round-trip bug that shipped under a 603/603-green suite. **`cht convert`
+> (pyxform) must be part of the definition of "works" for anything that generates form rows** —
+> at minimum a CI leg that converts the generated fixtures. On-disk assertions cannot see this
+> class of defect.
+
+> **Note on QA's other hand-edits — not product bugs.** The `contact-summary.templated.js`
+> `return` → `module.exports` change and the missing `targets.js` / `resources.json` / `.eslintrc`
+> stubs were **test-fixture artifacts**: QA built inside `client/tests/fixtures/mini-config`,
+> which predates the "templates ship required minimal files" directive. All four real templates
+> already ship them correctly (verified). **But one real gap hides inside it:** the tool happily
+> edited a contact-summary file that compiles to a silent no-op and warned nobody → add a
+> preflight check for a contact-summary that exports nothing. Worth fixing the fixture too so it
+> stops manufacturing false findings.
 
 **A. Stop seeding `true &&` into every new form's eligibility.** *(one line)*
 The app-form scaffold writes `context.expression = 'true'` (`server/src/routes/forms.ts:565`),
