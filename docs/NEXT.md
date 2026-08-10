@@ -227,7 +227,20 @@ means hand-typing HTML.
 picker wraps it in the `<span style="color: …">` form. Same caret-splice mechanics as the
 existing insert-field button.
 
-**8. Create a translation key, with suggestions.** *(medium — the biggest single win)*
+**8. Bilingual task title — one input per language, exactly like choice labels.** *(medium — the biggest single win; DESIGN REVISED 2026-08-08 by the PO)*
+**Lead with the label inputs, not a key picker.** A task's Title field should render **one input
+per project locale** (`English` / `नेपाली`), identical to the per-locale choice-label row shipped
+in `8eda602`. The tool auto-derives the key (`task.<name>.title`), writes it into `tasks.js`, and
+writes each string into `messages-<locale>.properties`. **The user never sees or types a key.**
+Reopening resolves the key and shows the strings; a literal title shows as one value with a
+"make this translatable" offer; the key stays stable on edit (renaming it would orphan the
+strings). Plumbing verified to exist: `GET /api/translations` discovers locales,
+`PUT /api/translations/:locale` writes and creates missing files. The key-suggestion dropdown is
+still worth building — but in the **Translations editor**, for filling in keys a config already
+references, not as the task author's path. Full spec:
+`docs/handoff-argpreserve-and-translations-2026-08-06.md` §2 (see the REVISED box).
+
+<details><summary>superseded framing</summary>
 Task titles need a hand-typed identifier (`task.geriatric.eye_followup.title`) and the
 translations screen can only edit keys that already exist on disk — so a bilingual task title
 can't be made in the tool at all. **This alone blocks 17 of the 18 tasks.**
@@ -237,6 +250,8 @@ in with your real task names (`task.<name>.title`), **(c)** CHT core keys, **(d)
 validated. Plus: the task title becomes a **picker showing the readable string** ("ANC
 follow-up") with inline Nepali + English entry. Writes into every locale file.
 Full spec: `docs/handoff-argpreserve-and-translations-2026-08-06.md` §2.
+
+</details>
 
 **9. "Stop the form here."** *(medium)*
 IHA R1 (patient declines consent) and RF R16 ("Form close") have no primitive. Today you wrap

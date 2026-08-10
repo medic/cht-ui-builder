@@ -59,6 +59,43 @@ This also **answers the open scope question**: we are *not* taking the literal-s
 | SMS / message | `messages.<event>.<state>` |
 | Core-defined (already exist; offer for override) | `task.overdue`, `task.due`, `task.upcoming`, `Messages`, `Tasks`, `Reports`, `People`, `Targets` |
 
+> ### ⭐ REVISED 2026-08-08 (PO) — lead with the label inputs, not the key picker
+> **PO question: "why can't this just work like adding choices — the same UI when adding a
+> tile?" Answer: it can, and it should. This supersedes the ordering below.**
+>
+> **Why it *looked* different (and why that doesn't matter):** a question or choice label lives
+> **inside the form file** as a `label::<locale>` column — the tool owns one file. A task title
+> lives in `tasks.js` as a **translation key**, with the strings in **separate**
+> `messages-<locale>.properties` files. That's *indirection*, not a barrier: it means the tool
+> writes to three files instead of one. It does not change what the user should see.
+>
+> **The design, therefore, is exactly the choices design:** the task's Title field renders
+> **one input per project locale** — `English` / `नेपाली` — stacked, identical to the per-locale
+> choice-label row shipped in `8eda602`. Behind it the tool:
+> 1. **auto-derives the key** from the task name using the CHT convention `task.<name>.title`
+>    (label-first slugify, numeric suffix on collision — same helper as everywhere else);
+> 2. writes that key into `tasks.js`;
+> 3. writes each typed string into its `messages-<locale>.properties`.
+>
+> **The user never sees or types a key** — which is the standing "identifiers are auto-derived,
+> never typed" principle, applied to the one surface that still violated it.
+>
+> **Reopening an existing task:** resolve the key against the `.properties` files and show the
+> **resolved strings** in the same inputs; edits write back to the `.properties`, and the key
+> itself stays stable (never rename on a title edit — that would orphan the strings, the same
+> trap as renaming a field mid-collection). A **literal** (non-key) title — which real configs do
+> use — displays as a single value with an offer to *"make this translatable"*. The raw key
+> stays visible as an advanced/read-only detail so a power user can still see what shipped.
+>
+> **All the plumbing exists** — verified: `GET /api/translations` already discovers the project's
+> locale files, `PUT /api/translations/:locale` writes them and **creates a missing file**
+> (added during the add-language work). This is wiring, not new infrastructure.
+>
+> **The key-suggestion dropdown below is still worth building — but as the `TranslationsEditor`
+> surface, not the task author's path.** It serves the different job of filling in keys that
+> already exist in a config (and the "referenced but missing" group is genuinely useful there).
+> The task author should never reach it.
+
 ### Design
 **A · "+ Add translation key" in `TranslationsEditor`.** A dropdown (a `<select>` with an "Other / custom…" escape, matching the `ChoiceValueInput` pattern already shipped) whose options are grouped, **best source first**:
 
