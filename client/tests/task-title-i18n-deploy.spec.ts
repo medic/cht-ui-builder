@@ -80,7 +80,16 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
 }) => {
   test.setTimeout(1_200_000);
 
-  /* ---------- a fresh CHT-baseline project (ships translations/messages-en) ---------- */
+  /* ---------- a fresh BLANK project ----------
+   * NOT "CHT baseline": that template's contact-summary requires `moment`
+   * and no template ships a package.json, so `compile-app-settings` — step 1
+   * of every deploy — fails and the pipeline stops before anything this spec
+   * cares about. Reported separately; it is not an item-8/W2 defect.
+   *
+   * Blank is also the STRONGER test here: it ships no `translations/` dir at
+   * all, so item 8 has to create the directory and BOTH locale files from
+   * nothing via the PUT's create-if-missing path.
+   */
   await fs.rm(PROJECT, { recursive: true, force: true });
   await page.request.post(`${API}/api/project/close`).catch(() => {});
   await page.goto('/');
@@ -88,7 +97,7 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   const wizard = page.locator('.modal-wide');
   await wizard
     .locator('.template-card')
-    .filter({ has: page.getByRole('heading', { name: 'CHT baseline' }) })
+    .filter({ has: page.getByRole('heading', { name: 'Blank project' }) })
     .click();
   await wizard.getByRole('button', { name: /Next/ }).click();
   await wizard.locator('.form-row', { hasText: 'Parent folder' }).locator('input').fill(PARENT);
@@ -96,6 +105,27 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   await wizard.getByRole('button', { name: /Next/ }).click();
   await wizard.getByRole('button', { name: /Create project/ }).click();
   await expect(page.locator('.nav-item', { hasText: 'Forms' })).toBeVisible({ timeout: 60_000 });
+
+  // A task with appliesTo:'reports' MUST name at least one form, or
+  // `compile-app-settings` fails schema validation
+  // ("[0].appliesToType must contain at least 1 items") and the deploy stops
+  // at step 1. Blank ships no forms, so create one. Done over the API rather
+  // than through the form wizard: this spec is about titles, and the UI
+  // creation flow is covered elsewhere.
+  const created = await page.request.post(`${API}/api/forms/create`, {
+    data: { category: 'app', title: 'Title Probe', basename: 'title_probe', scaffold: 'default' },
+  });
+  expect(created.ok(), `create probe form: ${await created.text()}`).toBeTruthy();
+
+  // Visit Forms before Tasks. The appliesToType checkbox list reads the
+  // Zustand `forms` slice, and ONLY FormsIndex populates it on mount — so a
+  // cold nav straight to Tasks shows no forms to tick at all. That is
+  // docs/NEXT.md finding B (same root cause as the Context-values dropdown),
+  // and it bites this spec exactly as it bites a user.
+  await page.locator('.nav-item', { hasText: 'Forms' }).click();
+  await expect(page.getByRole('button', { name: 'title_probe.xlsx' })).toBeVisible({
+    timeout: 30_000,
+  });
 
   /* ---------- item 8: the title, typed as STRINGS in two languages ---------- */
   await page.locator('.nav-item', { hasText: 'Tasks' }).click();
@@ -107,6 +137,12 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   const nameField = card.locator('.expr-field', { hasText: 'name' }).first();
   await nameField.locator('input').first().fill(TASK_NAME);
   await nameField.getByRole('button', { name: 'use this' }).click();
+
+  // Point the task at the probe form (schema requires a non-empty list).
+  await card
+    .locator('.expr-field', { hasText: 'appliesToType' })
+    .getByRole('checkbox', { name: 'title_probe', exact: true })
+    .check();
 
   const titleField = card.locator('.expr-field').filter({ hasText: 'what the CHW sees' }).first();
   await expect(titleField).toBeVisible();
@@ -139,13 +175,14 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   expect(tasksJs, 'tasks.js references the derived key').toContain(`title: '${TASK_KEY}'`);
   expect(tasksJs, 'the literal must NOT be inlined as the title').not.toContain(`title: '${EN}'`);
 
+  // NEITHER file existed — item 8 created the dir and both files via the
+  // PUT's create-if-missing path, in `translations/` (the ONLY dir cht-conf
+  // reads: TRANSLATIONS_DIR_PATH in cht-conf's project-paths).
   const enFile = await fs.readFile(
     path.join(PROJECT, 'translations', 'messages-en.properties'),
     'utf8',
   );
   expect(enFile).toContain(`${TASK_KEY} = ${EN}`);
-  // `ne` had no file at all — item 8 created it via the PUT's
-  // create-if-missing path, in `translations/` (the ONLY dir cht-conf reads).
   const neFile = await fs.readFile(
     path.join(PROJECT, 'translations', 'messages-ne.properties'),
     'utf8',
@@ -159,8 +196,18 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   await target
     .locator('input[placeholder="https://your-instance.medicmobile.org"]')
     .fill(INSTANCE);
-  await target.locator('input[placeholder="medic"]').fill('medic');
-  await target.locator('input[type="password"]').fill('password');
+  // Assert the credential fields actually took. `config.user` is persisted
+  // and reloaded, so a bare fill can be clobbered by an in-flight load — and
+  // an empty user makes the one-click run bail BEFORE it renders any step
+  // rows, which reads as "0 of 7 steps succeeded" rather than as a missing
+  // credential.
+  const userInput = target.locator('input[placeholder="medic"]');
+  await expect(userInput).toBeVisible();
+  await userInput.fill('medic');
+  await expect(userInput).toHaveValue('medic');
+  const pwInput = target.locator('input[type="password"]');
+  await pwInput.fill('password');
+  await expect(pwInput).toHaveValue('password');
   await target.getByRole('button', { name: /Test connection/ }).click();
   await expect(target.locator('.deploy-test-result.ok')).toBeVisible({ timeout: 30_000 });
 
@@ -172,6 +219,13 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   // action button, which is the gap this closes.
   await expect(oneclick).toContainText(/custom translations|upload-custom-translations/i);
   await oneclick.getByRole('button', { name: 'Deploy', exact: true }).click();
+  // Step ROWS appear synchronously once the run starts. Assert that first, so
+  // a credential bail-out fails in seconds with an obvious message instead of
+  // burning the 15-minute deploy timeout on "expected 7, received 0".
+  await expect(
+    oneclick.locator('.deploy-oneclick-step'),
+    'one-click did not start — check the deploy credentials',
+  ).toHaveCount(7, { timeout: 15_000 });
   await expect(oneclick.locator('.deploy-oneclick-step.state-success')).toHaveCount(7, {
     timeout: 900_000,
   });

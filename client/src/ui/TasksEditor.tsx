@@ -230,8 +230,15 @@ export function TasksEditor() {
         appliesTo: { kind: 'string', value: 'reports' },
         appliesToType: { kind: 'array', raw: '[]' },
         appliesIf: { kind: 'function', raw: 'function (contact, report) {\n  return true;\n}' },
-        events: { kind: 'array', raw: '[{ id: "new_task", days: 0, start: 0, end: 0 }]' },
-        actions: { kind: 'array', raw: '[{ form: "new_form" }]' },
+        // SINGLE quotes: these `raw` strings are emitted verbatim into
+        // tasks.js, and CHT's eslint config enforces `quotes: ['error',
+        // 'single']`. Double quotes here made EVERY tool-created task fail
+        // `compile-app-settings` ("Strings must use singlequote" → "Webpack
+        // warnings when building nools"), i.e. the first step of every
+        // deploy — found by the item-8 live-deploy spec. Same class as the
+        // bug `jsSingleQuoteString` was introduced to prevent.
+        events: { kind: 'array', raw: "[{ id: 'new_task', days: 0, start: 0, end: 0 }]" },
+        actions: { kind: 'array', raw: "[{ form: 'new_form' }]" },
       },
     };
     patchState({
