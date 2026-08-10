@@ -374,6 +374,19 @@ tool at an **existing** hand-written config.
 - **MEDIUM: the `label::_` phantom header becomes an active trap after the fix** — `FormEditor.tsx:3653` renders `<th>label::{loc}</th>` literally, so bare-label forms already show a `label::_` column; once a real `label::en` sits beside it pyxform lets `label::en` win and silently discards anything typed into `_`. Render `'_'` as `label` and make it read-only when a real locale column exists.
 - **LOW:** list-name collision guard is blind to survey-referenced-but-empty lists (`existingListNames` from `form.choices` only) · choice grid overflows at exactly **4** locales (measured: tracks pin at 177px min-content, ✕ 17px outside the card — fix with `minmax(0, 2fr)` + `min-width: 0`) · `opt_${i+1}` fallback isn't collision-checked against typed names · **Enter-to-add-row is a dead key for bilingual authors** (guard requires the *last* locale column and nothing focuses the new row — the commit message oversells it).
 
+## Standing QA rule added 2026-08-08 (PO directive): **no-code by default**
+**Every artifact QA produces must be authored through the UI.** Hand-editing a config file — or
+running a script that edits one — is permitted **only** to get past a tool gap that is *already
+filed as a finding*, and never to make a capability appear to work. When used it must be:
+1. **disclosed per instance** in the report — which file, what was changed, and why;
+2. **paired with the finding it works around** (a hand-fix with no finding is a reporting bug);
+3. **re-tested through the UI** once that gap is fixed, and the result reported again.
+
+The purpose of these probes is to measure what a health-post officer can actually do. A silent
+hand-fix inflates that measurement, which is the one failure mode that makes the whole exercise
+worthless. *(QA's 2026-08-08 workflow probe complied — the hand-fixes were disclosed and each
+became finding W3/W4. This rule makes that behaviour the standard, not a courtesy.)*
+
 ## Standing process rule added 2026-08-08 (after the fourth green-tests/broken-reality case)
 1. **Cross-sheet or cross-locale logic must live in `shared/` as an exported pure function**, never inline in a React handler. `8eda602` was untestable *by construction*.
 2. **Stand up a hostile fixture corpus** — `shared/src/xlsform/fixtures/noncanonical/`: bare `label` on choices only, bare on both, legacy `label:ne`, survey-superset locales, extras interleaved between label columns. Workbooks written by a **raw xlsx writer**, never by our own serializer. Add `pnpm test:hostile` and name it in the Gates line of any commit touching parse/serialize/seat.
