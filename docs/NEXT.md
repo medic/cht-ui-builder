@@ -38,6 +38,9 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > read-only**; the only working path is the Raw JS hatch. This is the load-bearing joint for the
 > task→form hand-off.
 >
+> **→ W3 + W4 are now specced as one feature: `docs/handoff-task-to-form-handoff-2026-08-08.md`
+> — "make the task → form hand-off no-code". Next item after item 8 + W2.**
+>
 > ### W4 — the receiving `inputs` nodes can't be created either
 > "+ add inside" on the `inputs` group drops rows into `inputs/user/`, where CHT's content-binding
 > can't reach them (QA hand-relocated with a script). And delivered flags **aren't persisted** in
