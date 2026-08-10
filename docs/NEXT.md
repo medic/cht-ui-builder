@@ -7,7 +7,59 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 
 # What's next — geriatric use case first
 
+> ## ⚡ Workflow probe result (QA, 2026-08-08) — **the full loop WORKS live.**
+> Assessment → task → branched follow-up → resolution, built in the tool and proven on a real
+> CHT instance (steps 1–6 green; 7–8 blocked by CouchDB memory pressure, not by the tool).
+> Timing behaved exactly as warned: proven with the day-0 variant, then 15/30/15 restored and
+> the task correctly sat in Draft until day 15. **Interaction cost: ~124 UI actions for the 7
+> referral flags (~18 each), ~65 for the task, ~180 for the 12-row follow-up.**
+> Findings filed below as **W1–W6**.
+>
+> ### 🔴 W1 re-opens the parked safety batch — the parking rationale no longer holds
+> We parked the `appliesIfParser` safety batch on the reasoning that corruption *"only bites when
+> the tool opens pre-existing hand-written JavaScript"* — i.e. imported configs only. **That is
+> now false.** QA reproduced a silent no-op-save corruption of **`server/templates/cht-default/tasks.js`**
+> — *our own template, shipped by our own wizard*: its computed
+> `events: [...Array(21).keys()].map(generateEventForHomeVisit(...))` (line 136, confirmed) is
+> truncated to a bare integer array, and 47 lines of comments/formatting are lost. **A user who
+> picks cht-default and opens the Tasks panel corrupts their project.** Recommend un-parking at
+> least this item.
+>
+> ### 🔴 W2 — item 8 is POINTLESS without a one-line deploy fix
+> **`upload-custom-translations` is missing from the one-click deploy sequence** (`deploy.ts:40-46`
+> — verified; note **`upload-resources` IS present**, so QA's finding is narrower than reported).
+> The action exists as an individual step (`cht-conf.ts:73`); it just never runs in the sequence.
+> **So bilingual task titles would be authored, written to `.properties`, and never uploaded —
+> the CHW sees the raw key.** → **Add it to the sequence as part of item 8's definition of done.**
+>
+> ### W3 — `modifyContent` cannot be authored no-code (the capability we said was "built but untested")
+> Three failures: the source picker emits `report.<field>` where CHT needs **`report.fields.*`**
+> (undefined at runtime); switching a row to custom **resets it and demotes the whole table to
+> read-only**; the only working path is the Raw JS hatch. This is the load-bearing joint for the
+> task→form hand-off.
+>
+> ### W4 — the receiving `inputs` nodes can't be created either
+> "+ add inside" on the `inputs` group drops rows into `inputs/user/`, where CHT's content-binding
+> can't reach them (QA hand-relocated with a script). And delivered flags **aren't persisted** in
+> the saved follow-up doc — the scaffold gates inputs on `source='user'` and Enketo clears
+> non-relevant values on submit. Real configs solve this with harvest calculates, which the tool
+> also can't author. **W3 + W4 together mean the task→form hand-off is not yet no-code.**
+>
+> ### W5 — `cht-default` doesn't compile as scaffolded
+> `require('moment')` with **no `package.json`** (confirmed absent). The per-template compile
+> guard never covered this template. Directly contradicts the "templates ship required minimal
+> files" directive.
+>
+> ### W6 — spec answers QA was forced to invent (need customer sign-off)
+> Hearing built as **OR** (sheet says "and"); **both** N6 tests trigger; nutrition branch kept
+> as-written; weight **not** a trigger; window anchored on IHA submission. Still unresolved and
+> worth escalating: **self-harm on a 30-day clock**, and the label-only choice values.
+>
+> ---
+>
 > # 🎯 CURRENT SINGLE FOCUS (PO, 2026-08-08): **item 8 only — the bilingual task title.**
+> **Scope now includes W2** (add `upload-custom-translations` to the one-click deploy sequence) —
+> without it the feature cannot reach a device.
 > **Build nothing else until it lands.** One input per project locale on the task's Title
 > field, exactly like the per-locale choice labels shipped in `8eda602`; the key is
 > auto-derived and never shown. Full design + implementation notes:
