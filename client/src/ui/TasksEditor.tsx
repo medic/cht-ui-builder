@@ -13,7 +13,9 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
+  deriveTaskTitleKey,
   jsSingleQuoteString,
+  looksLikeTranslationKey,
   parseTaskFile,
   slugifyHierarchyId,
   type FieldValue,
@@ -38,6 +40,26 @@ interface TasksState {
   parsed: ParsedTaskFile | null;
 }
 
+/**
+ * The project's translation files, read ONCE for the whole editor
+ * (docs/NEXT.md item 8). Fetched here rather than inside `TaskCard` because
+ * a card renders per task — an 18-task config would otherwise fire 18
+ * identical GETs.
+ */
+interface TranslationsSnapshot {
+  /** Locale codes the project ships, in discovery order. `['en']` when none. */
+  locales: string[];
+  /** locale → the dir its file lives in, so a PUT rewrites the SAME file
+   *  instead of creating a sibling in the other candidate dir. */
+  dirs: Record<string, string>;
+  /** locale → key → value, as currently on disk. */
+  values: Record<string, Record<string, string>>;
+  /** Every key defined in any locale — the collision set for key derivation. */
+  allKeys: string[];
+}
+
+const EMPTY_TX: TranslationsSnapshot = { locales: ['en'], dirs: {}, values: {}, allKeys: [] };
+
 export function TasksEditor() {
   const setError = useApp((s) => s.setError);
   const setDirty = useApp((s) => s.setDirty);
@@ -53,6 +75,62 @@ export function TasksEditor() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'structured' | 'raw'>('structured');
   const [activeRawFile, setActiveRawFile] = useState<FileKey>('tasks.js');
+  // docs/NEXT.md item 8 — the project's translation files, plus the strings
+  // the author has typed but not yet saved. Titles are edited as STRINGS
+  // here and flushed to `messages-<locale>.properties` on Save.
+  const [tx, setTx] = useState<TranslationsSnapshot>(EMPTY_TX);
+  const [pendingTx, setPendingTx] = useState<Record<string, Record<string, string>>>({});
+  // Locales the author added in this session. A project can DECLARE a
+  // language in base_settings (cht-default enables `ne`) while shipping only
+  // `messages-en.properties` — so sourcing the input list from the files
+  // alone would render English-only and leave no way to type the Nepali
+  // title. Adding one here materializes the input immediately; the file
+  // itself is created by the first save (the PUT's create-if-missing path).
+  const [extraLocales, setExtraLocales] = useState<string[]>([]);
+
+  const txWithExtras: TranslationsSnapshot = useMemo(
+    () => ({
+      ...tx,
+      locales: [...tx.locales, ...extraLocales.filter((l) => !tx.locales.includes(l))],
+    }),
+    [tx, extraLocales],
+  );
+
+  /**
+   * How many tasks point at each title key. Real configs DO share one key
+   * across entries — cht-default reuses `task.anc.pregnancy_home_visit.title`
+   * on two tasks — and because the strings live outside tasks.js, editing the
+   * title on one card would silently rewrite the other task's title too. The
+   * field warns instead of pretending the edit is local.
+   */
+  const titleKeyUses = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of state?.parsed?.entries ?? []) {
+      const t = e.fields['title'];
+      const key = t?.kind === 'string' ? t.value.trim() : '';
+      if (key) counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [state?.parsed?.entries]);
+
+  function addLocale(raw: string) {
+    const locale = raw.trim().toLowerCase();
+    // Same shape the translations route validates (`messages-<locale>`).
+    if (!/^[a-z]{2,3}([-_][a-z0-9]+)?$/i.test(locale)) {
+      setError(`"${raw}" is not a language code (try "ne", "fr", "pt_BR").`);
+      return;
+    }
+    if (txWithExtras.locales.includes(locale)) return;
+    setExtraLocales((prev) => [...prev, locale]);
+  }
+
+  /** Stage one locale's string for a key. Marks the editor dirty so Save
+   *  lights up even when `tasks.js` itself did not change (editing the EN
+   *  text of an existing key touches only the .properties file). */
+  function setTranslation(key: string, locale: string, value: string) {
+    setPendingTx((prev) => ({ ...prev, [locale]: { ...(prev[locale] ?? {}), [key]: value } }));
+    setDirty('tasks', true);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -70,6 +148,48 @@ export function TasksEditor() {
         if (!alive) return;
         setError(e.message);
         setLoading(false);
+      });
+
+    // docs/NEXT.md item 8 — translations load INDEPENDENTLY of tasks.js.
+    // Deliberately its own promise chain, not a `.then` on the one above: a
+    // project with no translations dir is completely normal (the title field
+    // then falls back to a single `en` input, and the first save CREATES
+    // `translations/messages-en.properties` via the server's
+    // create-if-missing path), so this failing must never surface an error
+    // or leave the editor stuck on "Loading…".
+    api
+      .getTranslations()
+      .then((t) => {
+        if (!alive || !t) return;
+        const locales: string[] = [];
+        const dirs: Record<string, string> = {};
+        const values: Record<string, Record<string, string>> = {};
+        const allKeys = new Set<string>();
+        for (const f of t.files) {
+          // First file wins per locale: `getTranslations` scans the root
+          // `translations/` dir before the nested one, and root is the only
+          // dir cht-conf's upload-custom-translations actually reads.
+          if (dirs[f.locale] !== undefined) continue;
+          locales.push(f.locale);
+          dirs[f.locale] = f.dir;
+          const byKey: Record<string, string> = {};
+          for (const line of f.entries) {
+            if (line.kind === 'entry') {
+              byKey[line.key] = line.value;
+              allKeys.add(line.key);
+            }
+          }
+          values[f.locale] = byKey;
+        }
+        setTx({
+          locales: locales.length > 0 ? locales : ['en'],
+          dirs,
+          values,
+          allKeys: [...allKeys],
+        });
+      })
+      .catch(() => {
+        /* no translations in this project — keep the `en`-only fallback */
       });
     return () => {
       alive = false;
@@ -136,12 +256,49 @@ export function TasksEditor() {
       if (state.parsed && state.parsed.arrayBounds && view === 'structured') {
         nextTasks = rebuildTasksFile(state.parsed);
       }
+
+      // docs/NEXT.md item 8 — TRANSLATIONS FIRST, then tasks.js. A key
+      // pointing at strings that exist is recoverable; a string file with no
+      // referencing key is harmless. The reverse order can ship a task whose
+      // title renders as a raw key. If any PUT throws we bail BEFORE writing
+      // tasks.js, so there is no half-state.
+      //
+      // `dir` is pinned to the file the locale already lives in, so a
+      // project whose files sit in `app_settings/forms/translations/` is
+      // rewritten in place rather than gaining a second file in
+      // `translations/`. A locale with no file yet is sent WITHOUT a dir,
+      // which makes the server create the canonical `translations/` one.
+      for (const [locale, updatesByKey] of Object.entries(pendingTx)) {
+        const updates = Object.entries(updatesByKey).map(([key, value]) => ({ key, value }));
+        if (updates.length === 0) continue;
+        await api.putTranslations(locale, updates, tx.dirs[locale]);
+      }
+
       await api.saveTaskFile('tasks.js', nextTasks);
       for (const f of SECONDARY_FILES) {
         const c = state.raw[f];
         if (c !== null) await api.saveTaskFile(f, c);
       }
       setDirty('tasks', false);
+      // Fold the flushed strings into the on-disk snapshot so a second save
+      // does not re-send them, and so the inputs keep showing what shipped.
+      if (Object.keys(pendingTx).length > 0) {
+        setTx((prev) => {
+          const values = { ...prev.values };
+          const dirs = { ...prev.dirs };
+          const allKeys = new Set(prev.allKeys);
+          const locales = [...prev.locales];
+          for (const [locale, byKey] of Object.entries(pendingTx)) {
+            values[locale] = { ...(values[locale] ?? {}), ...byKey };
+            for (const k of Object.keys(byKey)) allKeys.add(k);
+            if (!locales.includes(locale)) locales.push(locale);
+            // A locale we just created now lives in the canonical dir.
+            if (dirs[locale] === undefined) dirs[locale] = 'translations';
+          }
+          return { locales, dirs, values, allKeys: [...allKeys] };
+        });
+        setPendingTx({});
+      }
       // Re-parse what was just written and snapshot it as the new baseline.
       history.reset({
         raw: { ...state.raw, 'tasks.js': nextTasks },
@@ -211,6 +368,11 @@ export function TasksEditor() {
                   entry={entry}
                   onChange={(e) => patchEntry(idx, e)}
                   onRemove={() => removeEntry(idx)}
+                  titleKeyUses={titleKeyUses}
+                  tx={txWithExtras}
+                  pendingTx={pendingTx}
+                  setTranslation={setTranslation}
+                  addLocale={addLocale}
                 />
               ))}
               <button onClick={addEntry}>+ Add task</button>
@@ -251,6 +413,12 @@ function TaskCard(props: {
   entry: TaskEntry;
   onChange: (e: TaskEntry) => void;
   onRemove: () => void;
+  /** docs/NEXT.md item 8 — fetched once by the editor, not per card. */
+  titleKeyUses: Record<string, number>;
+  tx: TranslationsSnapshot;
+  pendingTx: Record<string, Record<string, string>>;
+  setTranslation: (key: string, locale: string, value: string) => void;
+  addLocale: (locale: string) => void;
 }) {
   const { entry } = props;
   const [expanded, setExpanded] = useState(true);
@@ -313,9 +481,15 @@ function TaskCard(props: {
             value={getString('name')}
             onChange={(v) => setField('name', { kind: 'string', value: v })}
           />
-          <TitleFieldWithI18nHint
+          <TaskTitleField
             value={getString('title')}
             onChange={(v) => setField('title', { kind: 'string', value: v })}
+            taskName={getString('name')}
+            sharedWith={Math.max(0, (props.titleKeyUses[getString('title').trim()] ?? 1) - 1)}
+            tx={props.tx}
+            pendingTx={props.pendingTx}
+            setTranslation={props.setTranslation}
+            addLocale={props.addLocale}
           />
           <ScalarField label="icon" value={getString('icon')} onChange={(v) => setField('icon', { kind: 'string', value: v })} />
           <PriorityField
@@ -555,26 +729,151 @@ function ScalarField(props: {
  * need to live. Doesn't gate the input — the user can still type a raw
  * string for hardcoded titles.
  */
-function TitleFieldWithI18nHint(props: { value: string; onChange: (v: string) => void }) {
-  const looksLikeKey = /^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$/i.test(props.value.trim());
+function TaskTitleField(props: {
+  /** The raw `title` field from tasks.js — a translation key or a literal. */
+  value: string;
+  onChange: (v: string) => void;
+  taskName: string;
+  /** How many OTHER tasks share this title key (0 = exclusive). */
+  sharedWith: number;
+  tx: TranslationsSnapshot;
+  pendingTx: Record<string, Record<string, string>>;
+  setTranslation: (key: string, locale: string, value: string) => void;
+  addLocale: (locale: string) => void;
+}) {
+  const { value, onChange, taskName, tx, pendingTx, setTranslation } = props;
+  const raw = value.trim();
+  const isKey = looksLikeTranslationKey(raw);
+
+  /** What to show in a locale's input: a pending edit wins over disk. */
+  const shown = (locale: string, key: string): string =>
+    pendingTx[locale]?.[key] ?? tx.values[locale]?.[key] ?? '';
+
+  // Does the key resolve anywhere? Drives the "no translations found" note.
+  const resolvesSomewhere =
+    isKey &&
+    tx.locales.some(
+      (l) => tx.values[l]?.[raw] !== undefined || pendingTx[l]?.[raw] !== undefined,
+    );
+
+  // The key we actually write under. `addEntry` seeds `task.new_task.title`
+  // BEFORE the author has named the task, so while that key still has no
+  // strings anywhere we adopt the one derived from the current name — there
+  // is nothing to orphan yet. The moment any string exists (on disk OR
+  // pending) the key FREEZES: renaming it then would orphan those strings,
+  // the same trap as renaming a field mid-collection.
+  const derivedKey = deriveTaskTitleKey(
+    taskName || 'task',
+    tx.allKeys.filter((k) => k !== raw),
+  ).key;
+  const writeKey = isKey && !resolvesSomewhere && derivedKey ? derivedKey : raw;
+
+  /**
+   * Promote a LITERAL (or empty) title to a translated one: derive the key,
+   * carry the literal across as the first locale's string so nothing the
+   * author typed is lost, and swap the field to the key. Derivation happens
+   * HERE and only here — once the field holds a key it is never re-derived,
+   * because renaming the key would orphan the strings (same trap as renaming
+   * a field mid-collection).
+   */
+  function makeTranslatable() {
+    const { key } = deriveTaskTitleKey(taskName || 'task', tx.allKeys);
+    if (!key) return;
+    const primary = tx.locales[0] ?? 'en';
+    if (raw !== '') setTranslation(key, primary, raw);
+    onChange(key);
+  }
+
+  if (!isKey) {
+    // Literal title — what plenty of real configs ship. Keep it editable as
+    // one plain input and OFFER the translated form; never convert silently.
+    return (
+      <label className="expr-field">
+        <span className="expr-label">
+          <code>title</code>
+          <em className="muted"> — what the CHW sees in their task list</em>
+        </span>
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Follow up with the patient"
+        />
+        <span className="muted small" style={{ marginTop: 4 }}>
+          This title is the same in every language.{' '}
+          <button
+            type="button"
+            className="link"
+            onClick={makeTranslatable}
+            title="Store this title in the project's translation files so it can differ per language"
+          >
+            Make it translatable
+          </button>
+        </span>
+      </label>
+    );
+  }
+
+  // Translated title: ONE INPUT PER LOCALE, exactly like the per-locale
+  // choice labels (8eda602). The author types strings; the key underneath is
+  // an advanced read-only detail.
   return (
     <label className="expr-field">
       <span className="expr-label">
         <code>title</code>
-        <em className="muted"> — translation key or literal string</em>
+        <em className="muted"> — what the CHW sees, per language</em>
       </span>
-      <input
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        placeholder="task.malaria.followup.title"
-      />
-      {looksLikeKey && (
-        <span className="muted small" style={{ marginTop: 4 }}>
-          📖 This looks like a translation key. Add the EN + NE strings under
-          {' '}<code>app_settings/forms/translations/messages-en.properties</code> and
-          {' '}<code>messages-ne.properties</code> in your project folder.
+      <div className="qtype-labels-field">
+        {tx.locales.map((loc) => (
+          <label key={loc} className="qtype-locale-label">
+            <span className="locale-tag">{loc}</span>
+            <input
+              value={shown(loc, writeKey)}
+              onChange={(e) => {
+                // Adopt the derived key on the first keystroke, so the string
+                // and the key it lives under are written together.
+                if (writeKey !== raw) onChange(writeKey);
+                setTranslation(writeKey, loc, e.target.value);
+              }}
+              placeholder={loc === tx.locales[0] ? 'Eye check follow-up' : `title (${loc})`}
+              aria-label={`Task title in ${loc}`}
+            />
+          </label>
+        ))}
+      </div>
+      <span className="row gap" style={{ marginTop: 4, alignItems: 'center' }}>
+        <button
+          type="button"
+          className="link small"
+          onClick={() => {
+            // eslint-disable-next-line no-alert
+            const next = window.prompt(
+              'Language code to add (e.g. ne for Nepali, fr for French):',
+            );
+            if (next) props.addLocale(next);
+          }}
+          title="Add another language for task titles. The project's messages file for it is created on save."
+        >
+          + language
+        </button>
+        {!resolvesSomewhere && (
+          <span className="muted small">
+            No translations for this title yet — type it above and it is created on save.
+          </span>
+        )}
+      </span>
+      {props.sharedWith > 0 && (
+        <span className="rule-row-warning" style={{ marginTop: 4 }}>
+          <strong>
+            Shared with {props.sharedWith} other task{props.sharedWith === 1 ? '' : 's'}.
+          </strong>{' '}
+          They all read this same title, so editing it here changes theirs too.
         </span>
       )}
+      {/* The key stays visible as a read-only detail so a power user can see
+          what actually shipped, without ever having to type it. */}
+      <span className="muted small" style={{ marginTop: 4 }}>
+        Saved in the project&apos;s translation files as <code>{writeKey}</code>.
+      </span>
     </label>
   );
 }

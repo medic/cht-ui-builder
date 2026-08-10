@@ -28,7 +28,20 @@ test('DEPLOY_STEPS is the fixed catalog and covers convert + upload for both for
       'upload-contact-forms',
       'upload-app-settings',
       'upload-resources',
+      // W2 — the delivery path for translation strings (task titles).
+      'upload-custom-translations',
     ],
+  );
+});
+
+test('W2 — upload-custom-translations is last, matching cht-conf defaultActions order', () => {
+  // cht-conf runs it after upload-resources (src/lib/main.js). Keeping the
+  // same relative order means the friendly-error translator and the docs
+  // both keep applying.
+  assert.equal(DEPLOY_STEPS[DEPLOY_STEPS.length - 1], 'upload-custom-translations');
+  assert.ok(
+    DEPLOY_STEPS.indexOf('upload-custom-translations') >
+      DEPLOY_STEPS.indexOf('upload-resources'),
   );
 });
 
@@ -76,6 +89,8 @@ test('buildStepArgs — all upload-* steps get creds; convert-* / compile-* do n
     'upload-contact-forms',
     'upload-app-settings',
     'upload-resources',
+    // W2 — talks to the instance, so it must get URL + credentials.
+    'upload-custom-translations',
   ];
   for (const s of uploads) {
     const { args } = buildStepArgs(s, CREDS);

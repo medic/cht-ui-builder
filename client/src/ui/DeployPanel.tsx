@@ -86,10 +86,19 @@ const CATEGORY_LABELS: Record<Category, string> = {
 };
 
 /**
- * The one-click deploy pipeline's default step order — matches the server's
- * DEPLOY_STEPS enum in server/src/routes/deploy.ts. Kept local (not
- * re-exported from server) because the client only needs the names as
- * strings; the server validates each name against its own allowlist.
+ * The one-click deploy pipeline's default step order. The server's
+ * DEPLOY_STEPS (server/src/routes/deploy.ts) is the ALLOWLIST of what may
+ * run; this is the subset one-click actually runs. Kept local because the
+ * client only needs the names as strings.
+ *
+ * NOTE the two lists are not identical: the server also allows
+ * `upload-resources`, which one-click does not run (pre-existing — see the
+ * W2 commit message; icons/images therefore need the granular deploy).
+ *
+ * W2 — `upload-custom-translations` MUST be here, not just in the server
+ * allowlist, or a one-click deploy leaves every translation string on disk
+ * and the CHW reads the raw key. That is the delivery half of the
+ * per-locale task titles (docs/NEXT.md item 8).
  */
 const DEFAULT_DEPLOY_STEPS: readonly string[] = [
   'compile-app-settings',
@@ -98,6 +107,7 @@ const DEFAULT_DEPLOY_STEPS: readonly string[] = [
   'upload-app-forms',
   'upload-contact-forms',
   'upload-app-settings',
+  'upload-custom-translations',
 ];
 
 interface DeployRunStep {
@@ -397,6 +407,11 @@ export function DeployPanel() {
       'upload-contact-forms',
       'upload-app-settings',
       'upload-resources',
+      // Same reason as the others: the action calls cht-conf's
+      // `warnUploadOverwrite`, which prompts interactively when the
+      // instance's `messages-<locale>` doc was last touched outside
+      // cht-conf. With no TTY the step would die, so one-click forces.
+      'upload-custom-translations',
     ]);
     const extraArgs: Record<string, string[]> = {};
     for (const s of steps) if (FORCE_STEPS.has(s)) extraArgs[s] = ['--force'];

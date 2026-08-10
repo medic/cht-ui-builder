@@ -44,6 +44,27 @@ export const DEPLOY_STEPS = [
   'upload-contact-forms',
   'upload-app-settings',
   'upload-resources',
+  // W2 — without this, everything the tool writes into
+  // `translations/messages-<locale>.properties` stays on disk and the CHW
+  // sees the raw translation key instead of the string. That is the whole
+  // delivery path for task titles (docs/NEXT.md item 8), so a one-click
+  // deploy that omits it ships nothing.
+  //
+  // Position matches cht-conf's own canonical order, which runs
+  // upload-custom-translations after upload-resources (its
+  // `src/lib/main.js` defaultActions). It is independent of
+  // compile/upload-app-settings — it writes `messages-<locale>` docs
+  // straight to the instance database.
+  //
+  // Safe to run unconditionally: cht-conf's action resolves
+  // `<project>/translations` and, when that directory is absent, logs
+  // `Could not find custom translations dir` and RETURNS — it does not
+  // throw (verified in cht-conf 6.5.0
+  // `src/fn/upload-custom-translations.js`). Empty message values are
+  // likewise only warned about; only placeholder/messageformat errors are
+  // fatal. So projects with no translations keep deploying exactly as
+  // before, just with one extra skipped step.
+  'upload-custom-translations',
 ] as const;
 
 export type DeployStep = (typeof DEPLOY_STEPS)[number];
@@ -57,6 +78,7 @@ const UPLOAD_STEPS = new Set<DeployStep>([
   'upload-contact-forms',
   'upload-app-settings',
   'upload-resources',
+  'upload-custom-translations',
 ]);
 
 export interface DeployRunBody {
