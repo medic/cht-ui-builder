@@ -7,6 +7,19 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 
 # What's next — geriatric use case first
 
+> # 🎯 CURRENT SINGLE FOCUS (PO, 2026-08-08): **item 8 only — the bilingual task title.**
+> **Build nothing else until it lands.** One input per project locale on the task's Title
+> field, exactly like the per-locale choice labels shipped in `8eda602`; the key is
+> auto-derived and never shown. Full design + implementation notes:
+> `docs/handoff-argpreserve-and-translations-2026-08-06.md` §2 (the **REVISED** box), and
+> item **8** below.
+>
+> *Parked by this directive, not cancelled — and both still matter:* **P1-LOCALE-SEAT** (the
+> `8eda602` regression that silently blanks choice labels on 11 imported configs, one of them a
+> live NSSD production form) and **P1-DEPLOY** (insert-contact-field emits a form that fails
+> `cht convert`). Neither fires unless someone adds a choice list to an affected imported form,
+> or uses a patient-name insert — so parking them is safe for now. Pick them up next.
+
 **PO directive (2026-08-06): finish the geriatric use case before anything else. Ordered
 easiest → hardest.** Everything else in this file is parked below the line.
 

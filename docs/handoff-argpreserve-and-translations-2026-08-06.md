@@ -95,6 +95,40 @@ This also **answers the open scope question**: we are *not* taking the literal-s
 > surface, not the task author's path.** It serves the different job of filling in keys that
 > already exist in a config (and the "referenced but missing" group is genuinely useful there).
 > The task author should never reach it.
+>
+> ---
+> #### Implementation notes (everything below is verified to exist)
+> **Replace** `TitleFieldWithI18nHint` (`client/src/ui/TasksEditor.tsx:558`), mounted at
+> `:316-319` with `value={getString('title')}` / `onChange → setField('title', …)`.
+>
+> **Locales:** `api.getTranslations()` → `{ files: [{ locale, entries, … }] }` (`api.ts:413`;
+> server `translations.ts:105`). Use those locales as the input list — same source the
+> Translations editor already uses. Fall back to `['en']` when none exist.
+>
+> **Writing:** `api.putTranslations(locale, updates, dir?)` (`api.ts:427`) with
+> `updates: {key, value}[]`. **Omit `dir`** — the route already falls back to creating
+> `translations/messages-<locale>.properties` when the locale has no file yet (that fallback
+> was added for the Add-language chip bar). One PUT per locale.
+>
+> **Key derivation:** reuse the existing task-`name` slugify at `TasksEditor.tsx:637-660` — note
+> it already does `slugifyHierarchyId(...).replace(/_/g, '-')` to match cht-default's style.
+> Emit `task.<name>.title`. Derive **on create only**; never re-derive on a title edit.
+>
+> **Save ordering:** write the `.properties` files first, then the `tasks.js` field — a key
+> pointing at strings that exist is recoverable; a string file with no referencing key is
+> harmless. Surface a single error if a PUT fails and do not write a half-state.
+>
+> **Detecting the existing shape** on open: if `title` matches the key pattern
+> (`^[a-z][\w.-]*(\.[\w-]+)+$`) **and** resolves in at least one `.properties` file → show the
+> resolved strings. If it matches the pattern but resolves nowhere → show empty inputs plus a
+> muted "no translations found for `<key>` — type them here to create them". Otherwise treat it
+> as a **literal** title: one input, plus a "make this translatable" action.
+>
+> **Tests:** unit the key derivation + collision suffix; e2e (extend
+> `geriatric-blockers.spec.ts` or a new leg) — create a task, type EN + NE titles, save, then
+> assert **on disk** that `tasks.js` carries `task.<name>.title` and that **both**
+> `messages-en.properties` and `messages-ne.properties` gained the key with the right values.
+> Per the standing rule, the Gates line must name a spec that actually executes this path.
 
 ### Design
 **A · "+ Add translation key" in `TranslationsEditor`.** A dropdown (a `<select>` with an "Other / custom…" escape, matching the `ChoiceValueInput` pattern already shipped) whose options are grouped, **best source first**:
