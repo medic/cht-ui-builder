@@ -29,6 +29,7 @@ export * from './tasks/actionsParser.js';
 export * from './tasks/contextExpressionParser.js';
 export * from './tasks/helpersParser.js';
 export * from './tasks/taskTitleKey.js';
+export * from './tasks/jsSerializer.js';
 export * from './fhir/types.js';
 export * from './fhir/key.js';
 export * from './fhir/parse.js';

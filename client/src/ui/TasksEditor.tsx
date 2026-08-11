@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   deriveTaskTitleKey,
   jsSingleQuoteString,
+  rebuildTaskFile,
   looksLikeTranslationKey,
   parseTaskFile,
   slugifyHierarchyId,
@@ -261,7 +262,7 @@ export function TasksEditor() {
       // Rebuild tasks.js if we have a parsed view; else write the raw text.
       let nextTasks = state.raw['tasks.js'] ?? '';
       if (state.parsed && state.parsed.arrayBounds && view === 'structured') {
-        nextTasks = rebuildTasksFile(state.parsed);
+        nextTasks = rebuildTaskFile(state.parsed);
       }
 
       // docs/NEXT.md item 8 — TRANSLATIONS FIRST, then tasks.js. A key
@@ -1243,39 +1244,9 @@ function RawField(props: {
  * source between arrayBounds. Imports and helpers outside the array stay
  * untouched.
  */
-function rebuildTasksFile(parsed: ParsedTaskFile): string {
-  if (!parsed.arrayBounds) return parsed.source;
-  const before = parsed.source.slice(0, parsed.arrayBounds.start + 1);
-  const after = parsed.source.slice(parsed.arrayBounds.end);
-  const bodies = parsed.entries.map(entryToSource).join(',\n  ');
-  return `${before}\n  ${bodies}\n${after}`;
-}
-
-function entryToSource(entry: TaskEntry): string {
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(entry.fields)) {
-    // Single-quote non-identifier keys to match CHT's eslint config
-    // (quotes: ['error', 'single']); JSON.stringify would use double quotes.
-    const keyOut = /^[a-zA-Z_$][\w$]*$/.test(k) ? k : jsSingleQuoteString(k);
-    lines.push(`    ${keyOut}: ${fieldValueToSource(v)}`);
-  }
-  return `{\n${lines.join(',\n')}\n  }`;
-}
-
-function fieldValueToSource(v: FieldValue): string {
-  switch (v.kind) {
-    case 'string':
-      return jsSingleQuoteString(v.value);
-    case 'number':
-      return String(v.value);
-    case 'boolean':
-      return String(v.value);
-    case 'identifier':
-      return v.value;
-    case 'array':
-    case 'object':
-    case 'function':
-    case 'unknown':
-      return v.raw;
-  }
-}
+// The tasks.js serializer now lives in shared (`tasks/jsSerializer.ts`) so
+// its byte-stability invariant can be pinned by a unit test against the real
+// shipped templates. It used to be three private functions here, and it
+// reprinted EVERY entry on every save — which silently dropped comments and
+// truncated hand-written computed expressions in tasks the author never
+// touched. See jsSerializer.test.ts for the no-op-save pin.
