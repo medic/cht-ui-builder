@@ -19,6 +19,13 @@ job was to break the first one's conclusions.
 > compiles, `npm test` passes, the deploy succeeds, and the damage reaches phones. Nothing warns
 > anybody. That is what makes this batch different from ordinary bugs.
 
+> **These are not "NSSD problems."** See [`../principle-config-agnostic.md`](../principle-config-agnostic.md).
+> NSSD was simply the first real config we opened, so it was the first to expose defects that were
+> always there. Compared across the four real configs on disk, they disagree with each other on
+> almost every convention we hardcoded — the argument style we always emit is used by **1 of 4**;
+> our generated task-title key shape is used by **none**; duplicate translation keys exist in **all
+> four**. Read every finding as *"we hardcoded one project's convention and called it the standard."*
+
 ---
 
 ## 1. The hidden block stops being hidden — 19 of 34 contact forms

@@ -19,6 +19,25 @@ Three of the worst were independently re-verified by the planner and reproduce e
 scaffold problem, and we are no longer scaffolding. The old #5 (`P1-LOCALE-SEAT`) rises, because
 "imported config" stopped being hypothetical.
 
+> ## ⚠️ Read [`principle-config-agnostic.md`](principle-config-agnostic.md) before starting
+> **These are not "NSSD fixes."** NSSD was just the first real config we opened; every finding is a
+> place where **we hardcoded one project's convention and called it the standard.** Measured across
+> the four real configs on disk, they disagree with each other on almost everything we hardcoded:
+>
+> - `isAlive(contact.contact)` — the shape we always emit — is used by **1 of 4** configs. Two use
+>   `isAlive(contact)`. Both are correct CHT.
+> - The extras filename is `contact-summary.extras.js` in gandaki and lumbini, `contact-summary-extras.js`
+>   in nssd. **Both must work.**
+> - Our generated task-title key is hyphenated; **0 of 42 real title keys across three configs
+>   contain a hyphen.** It matches only our own scaffold.
+> - Duplicate translation keys exist in **all four**. The project root sits below the git root in
+>   **3 of 4**. moh-nepal runs **seven locales**.
+>
+> **So the acceptance test for every fix below is: "is this also correct in the other three configs?"**
+> Emitting `isAlive(contact)` instead would fix nssd and lumbini and **break gandaki** — that's not a
+> fix, it's a different hardcode. Preserve what you read; derive what you write; refuse what you
+> can't model.
+
 ---
 
 ## Batch A — corruption on read/no-op-save. Nothing else ships first.
