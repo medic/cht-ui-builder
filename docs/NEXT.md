@@ -25,6 +25,20 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > picks cht-default and opens the Tasks panel corrupts their project.** Recommend un-parking at
 > least this item.
 >
+> **✅ OWNERSHIP AGREED (planner + dev + QA, independently, 2026-08-11).** Everything is inside
+> **`ui-builder-for-cht`** — nothing needs a change to cht-core.
+>
+> | # | Issue | Owning layer | No-code capability gap? |
+> |---|---|---|---|
+> | 1 | `moment` won't compile | **template packaging** — `server/templates/cht-default/` | **No.** Nothing in a no-code UI expresses "install a dependency". Ship a `package.json` or vendor a moment-free contact-summary. |
+> | 2 | `refer_*` land in `inputs/user/` | **client** insert logic (+ `shared/xlsform/surveyEdits`) & the mapping editor | **Yes — the only true one.** |
+> | 3 | `tasks.js` corrupted on save | **shared** parsers + **client** `TasksEditor` | **No — a correctness bug, not a missing capability.** |
+> | 4 | API patient seeding | QA specs only (`client/tests/`) | **n/a — not a defect.** |
+>
+> **The one genuinely fixed constraint is cht-core's:** task `modifyContent` binds only to nodes
+> that are **direct children of `inputs`**. That is platform behaviour to design around, not a bug
+> — and it is what makes #2 a real gap rather than a preference.
+>
 > **🔑 Root cause found — and it points at a better fix than "preserve computed expressions".**
 > `rebuildTasksFile` (`TasksEditor.tsx:1246-1252`) re-emits **every** entry from its parsed
 > `fields` via `entryToSource`, then joins them — so an untouched, hand-written task is
@@ -36,6 +50,29 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > corruption class (comments, formatting, computed expressions, anything unrecognised) instead
 > of patching one expression shape, and the data needed is already parsed and unused.
 > Pin it with a byte-stability test on the `cht-default` fixture.
+>
+> **TWO COMPLEMENTARY LEVERS — the synthesis of all three analyses. Both are needed; lever 1 is
+> the one to build now.**
+> - **Lever 1 · per-entry splice (client `TasksEditor`).** Re-serialize only entries the user
+>   edited; emit the rest from `entry.source` verbatim. **The dev found the detail that makes this
+>   nearly free: `patchEntry` replaces only the edited entry (`entries.map((e,i) => i===idx ? next : e)`),
+>   so untouched entries stay *referentially identical* to the baseline `history.reset` object** —
+>   reference equality IS the dirty flag. No new state. → the five shipped cht-default tasks become
+>   byte-identical, and QA's fixup #3 disappears.
+> - **Lever 2 · fail-CLOSED parsing (`shared/src/tasks/eventsParser.ts` and siblings).** **QA found
+>   the root cause beneath ours:** the events parser *recognised* the leading `[...Array(21).keys()]`,
+>   *failed* to represent the `.map(i => generateEventForHomeVisit(...))` chain, and kept **only the
+>   part it understood** instead of falling back to raw. The model silently holds less than the file
+>   said, and regeneration writes that loss to disk. **This is literally item A2 of the parked safety
+>   batch** ("anything unrecognised keeps the whole body verbatim").
+>
+> **They are not alternatives.** Lever 1 protects entries the user never touched — which is the
+> live corruption and the demo blocker. Lever 2 protects the entry the user *does* edit. Ship
+> lever 1 first; lever 2 comes with the safety batch.
+>
+> **Regression pin (trivial, and would have caught this on day one):** for each shipped template,
+> load it, save with no edits, assert the file is **byte-identical**. Same shape as the appliesIf
+> round-trip pin.
 >
 > ### 🔴 W2 — item 8 is POINTLESS without a one-line deploy fix
 > **`upload-custom-translations` is missing from the one-click deploy sequence** (`deploy.ts:40-46`
