@@ -25,6 +25,18 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > picks cht-default and opens the Tasks panel corrupts their project.** Recommend un-parking at
 > least this item.
 >
+> **🔑 Root cause found — and it points at a better fix than "preserve computed expressions".**
+> `rebuildTasksFile` (`TasksEditor.tsx:1246-1252`) re-emits **every** entry from its parsed
+> `fields` via `entryToSource`, then joins them — so an untouched, hand-written task is
+> re-serialized on every save, and anything the parser only partly understood is degraded.
+> **But `TaskEntry` already carries `bounds: {start, end}` and the original `source` text**
+> (`jsParser.ts:32-39`) — the rebuild simply ignores them.
+> → **Fix: splice per ENTRY, not per array.** Re-serialize only the entries the user actually
+> edited; emit every other entry from its original byte range verbatim. That kills the whole
+> corruption class (comments, formatting, computed expressions, anything unrecognised) instead
+> of patching one expression shape, and the data needed is already parsed and unused.
+> Pin it with a byte-stability test on the `cht-default` fixture.
+>
 > ### 🔴 W2 — item 8 is POINTLESS without a one-line deploy fix
 > **`upload-custom-translations` is missing from the one-click deploy sequence** (`deploy.ts:40-46`
 > — verified; note **`upload-resources` IS present**, so QA's finding is narrower than reported).
