@@ -5,7 +5,10 @@ Answer: not yet. Nine P0 defects, most triggered by opening a panel and saving w
 2026-08-11.
 -->
 
-# config-nssd readiness audit — **STOP before you edit**
+# NSSD initial assessment — **STOP before you edit**
+
+*The baseline reading of config-nssd. Everything measured here is the state of the config and the
+editor on 2026-08-11, before any fix; re-run the lanes after batch A to measure progress against it.*
 
 **Target:** `W:\medic\config-nssd\chis` (branch `954_geriatric`, real `medic/config-nssd`).
 **Scale:** 36 app forms + 34 contact forms, `tasks.js` 1001 lines / 29 tasks, `contact-summary-extras.js`

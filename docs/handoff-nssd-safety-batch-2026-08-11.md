@@ -12,7 +12,7 @@ P0-class defects **silently corrupt it**. Six fire on **open-a-panel-and-save wi
 Every one produces valid, compiling, deployable output.
 
 Full evidence, per-file counts and reproduction commands:
-[`reviews/nssd-readiness-audit-2026-08-11.md`](reviews/nssd-readiness-audit-2026-08-11.md).
+[`reviews/nssd-initial-assessment-2026-08-11.md`](reviews/nssd-initial-assessment-2026-08-11.md).
 Three of the worst were independently re-verified by the planner and reproduce exactly.
 
 **This replaces the previous order.** The old #1 (`cht-default` won't compile) drops out — it's a

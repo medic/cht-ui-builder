@@ -1,7 +1,7 @@
 <!--
 The operational answer to "let's build the geriatric use case in config-nssd": what you can safely
 touch today, what you must not, the git safety net, and the build order with NSSD's own conventions
-baked in. Evidence: reviews/nssd-readiness-audit-2026-08-11.md. 2026-08-11.
+baked in. Evidence: reviews/nssd-initial-assessment-2026-08-11.md. 2026-08-11.
 -->
 
 # Building geriatric in config-nssd — the safe protocol
@@ -12,7 +12,7 @@ baked in. Evidence: reviews/nssd-readiness-audit-2026-08-11.md. 2026-08-11.
 > ## The one-line answer
 > **Yes, you can start — but only on the two new geriatric forms.** Build them in the tool, in
 > config-nssd, today. **Hold the task** until the safety batch lands. Rationale below; the evidence
-> is in [`reviews/nssd-readiness-audit-2026-08-11.md`](reviews/nssd-readiness-audit-2026-08-11.md).
+> is in [`reviews/nssd-initial-assessment-2026-08-11.md`](reviews/nssd-initial-assessment-2026-08-11.md).
 >
 > This works because the corruption lives in **reading files somebody else wrote**. The geriatric
 > forms are files *we* write — no Excel formulas, no `choices-backup`, no hand-written JS. Almost
@@ -98,9 +98,37 @@ they can't satisfy the predicate anyway.
    'geriatric_health_assessment'`) — the tool writes `NAME: ['name']`, which is wrong for this config.
 8. Commit.
 
-### Phase 2 — the task (blocked, and for good reasons)
+### Phase 2 — the task (mostly buildable; three parts break)
 
-Three independent blockers, all in the safety batch:
+**Correction to an earlier, blunter reading: the task is not "blocked".** The scaffolding is fine —
+what breaks is three specific pieces of logic. Measured:
+
+| Part of the task | Status |
+|---|---|
+| Create a new task entry in `tasks.js` | ✅ **Safe.** Per-entry splice; 29/29 existing entries pristine, no-op rebuild byte-identical, single-edit drift **zero** |
+| `appliesTo` / `appliesToType` (trigger form) | ✅ picker-driven |
+| `events` — window 15 / 30 / 15 | ✅ picker-driven |
+| Title, name, icon, priority | ✅ (title key convention needs a hand-fix — B4) |
+| Action: "opens the Referral Follow-up form" | ✅ picker-driven |
+| `appliesIf` — OR of the 7 `refer_*` flags | ✅ connector pill handles it |
+| **`appliesIf` — the "patient is alive / not muted" guard** | ❌ **breaks on a NEW task too.** `appliesIfParser.ts:839/843` hardcode `isAlive(contact.contact)` regardless of what you typed, and NSSD's helper takes the bare wrapper — so the guard silently does nothing |
+| **`resolvedIf`** | ❌ the template omits the start clamp NSSD uses everywhere |
+| **`modifyContent` — carrying the flags into the follow-up** | ❌ emits an access that doesn't exist in this config |
+| **The receiving nodes in the follow-up form** | ❌ can't be authored (W3/W4) |
+
+**Two of those you can work around today**, if you accept a hand-edit: omit the alive/muted guard
+from the builder and add it by hand, and hand-write `resolvedIf`. `tasks.js:197` shows NSSD's own
+pattern and even comments the reason —
+`Math.max(addDays(dueDate, -event.start).getTime(), report.reported_date + 1); //+1 so that source
+ds_follow_up does not resolve itself`.
+
+**The data hand-off you cannot work around** — that's the real block, and it's the same W3/W4 seam
+we've been tracking since 2026-08-08. Without it the follow-up form can't branch per domain.
+
+**The standing risk while you work:** you'd be building next to 29 tasks that corrupt on a stray
+click into their rule builder. `git diff --stat` after every save.
+
+Three underlying blockers, all in the safety batch:
 
 - **`modifyContent` emits `report.<field>`** — a form-answer access that appears **0 times** in
   4,000+ lines of NSSD rules code. NSSD reads answers with `Utils.getField(report, 'dotted.path')`
