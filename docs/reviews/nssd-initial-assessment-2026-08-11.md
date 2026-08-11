@@ -10,6 +10,11 @@ Answer: not yet. Nine P0 defects, most triggered by opening a panel and saving w
 *The baseline reading of config-nssd. Everything measured here is the state of the config and the
 editor on 2026-08-11, before any fix; re-run the lanes after batch A to measure progress against it.*
 
+> 📖 **Plain-language version with worked examples:**
+> [`nssd-detailed-assessment-2026-08-11.md`](nssd-detailed-assessment-2026-08-11.md) — same findings,
+> explained through what a CHW would actually see. Use that one for the squad and MOH; this one
+> carries the counts, commands and file:line references for the dev.
+
 **Target:** `W:\medic\config-nssd\chis` (branch `954_geriatric`, real `medic/config-nssd`).
 **Scale:** 36 app forms + 34 contact forms, `tasks.js` 1001 lines / 29 tasks, `contact-summary-extras.js`
 825 lines / 50 callables, `base_settings.json` 27 keys, 8-level hierarchy, 425 KB of translations.

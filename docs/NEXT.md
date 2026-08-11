@@ -14,7 +14,8 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > compiling, deployable output — preflight passes, the validators pass, `npm test` passes, and one
 > of them even survives a parse→serialize→parse stability test because the corruption is idempotent.
 >
-> - **Evidence:** [`reviews/nssd-initial-assessment-2026-08-11.md`](reviews/nssd-initial-assessment-2026-08-11.md)
+> - **Evidence (technical):** [`reviews/nssd-initial-assessment-2026-08-11.md`](reviews/nssd-initial-assessment-2026-08-11.md)
+> - **Evidence (plain language, worked examples):** [`reviews/nssd-detailed-assessment-2026-08-11.md`](reviews/nssd-detailed-assessment-2026-08-11.md)
 > - **Dev work, ranked:** [`handoff-nssd-safety-batch-2026-08-11.md`](handoff-nssd-safety-batch-2026-08-11.md)
 > - **What you can safely build today:** [`nssd-build-protocol.md`](nssd-build-protocol.md)
 >
