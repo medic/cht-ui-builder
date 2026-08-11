@@ -7,7 +7,32 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 
 # What's next — geriatric use case first
 
-> # ▶ PRODUCT-FIXES-ONLY ORDER (PO, 2026-08-11)
+> # 🛑 SUPERSEDED — the config-nssd safety batch comes first (2026-08-11)
+> We pointed the editor at **`medic/config-nssd`**, a deployed national config (36 app forms, 34
+> contact forms, 29 tasks, 8-level hierarchy, 425 KB of translations). **Nine P0 defects silently
+> corrupt it.** Six fire on **open-a-panel-and-save with zero edits**. Every one produces valid,
+> compiling, deployable output — preflight passes, the validators pass, `npm test` passes, and one
+> of them even survives a parse→serialize→parse stability test because the corruption is idempotent.
+>
+> - **Evidence:** [`reviews/nssd-readiness-audit-2026-08-11.md`](reviews/nssd-readiness-audit-2026-08-11.md)
+> - **Dev work, ranked:** [`handoff-nssd-safety-batch-2026-08-11.md`](handoff-nssd-safety-batch-2026-08-11.md)
+> - **What you can safely build today:** [`nssd-build-protocol.md`](nssd-build-protocol.md)
+>
+> **What changed in the order below.** Opening a *real imported* config instead of a scaffold
+> reshuffles everything:
+> - ~~#1 `cht-default` won't compile~~ — **drops out.** It's a scaffold-packaging problem and we are
+>   no longer scaffolding. Keep it, but it stopped being urgent.
+> - ~~#3 bilingual task titles + W2~~ — **`upload-custom-translations` shipped** (`deploy.ts:67`).
+>   What remains is that `deriveTaskTitleKey` emits a key convention **no NSSD key uses** (batch B4).
+> - #2 the task→form hand-off — **still right, still the only true no-code capability gap**, and now
+>   with NSSD's real target shape measured (batch B1/B2).
+> - #5 `P1-LOCALE-SEAT` — **rises sharply.** "Imported config" stopped being hypothetical: the
+>   copied geriatric form is the only survey sheet of 70 with **no `label::ne`** on an instance whose
+>   locale **is** `ne`.
+>
+> **New order: batch A (corruption) → batch B (unblocks the task) → batch C (usability).**
+
+> # ▶ PRODUCT-FIXES-ONLY ORDER (PO, 2026-08-11) — kept for the record
 > **"No code quality or cosmetic fixes — actual product fixes first."** A product fix is one that
 > either **blocks a user from completing the workflow** or **silently produces broken output**.
 > Everything else (lint, CI wiring, test-ids, grid overflow at 4 locales, the scaffold's
