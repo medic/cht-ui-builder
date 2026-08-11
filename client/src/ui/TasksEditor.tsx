@@ -14,11 +14,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   deriveTaskTitleKey,
+  inferTaskSeparator,
+  slugifyTaskName,
   jsSingleQuoteString,
   rebuildTaskFile,
   looksLikeTranslationKey,
   parseTaskFile,
-  slugifyHierarchyId,
   type FieldValue,
   type ParsedTaskFile,
   type TaskEntry,
@@ -113,6 +114,24 @@ export function TasksEditor() {
     }
     return counts;
   }, [state?.parsed?.entries]);
+
+  /**
+   * The project's existing task `name`s — evidence for how THIS project spells
+   * identifiers (docs/principle-config-agnostic.md, posture 2: Derive). Task
+   * names matter alongside the title keys because a project can already carry
+   * tasks while defining no translations at all, in which case the names are
+   * the only evidence there is.
+   */
+  const taskNames = useMemo(
+    () =>
+      (state?.parsed?.entries ?? [])
+        .map((e) => {
+          const n = e.fields['name'];
+          return n?.kind === 'string' ? n.value.trim() : '';
+        })
+        .filter(Boolean),
+    [state?.parsed?.entries],
+  );
 
   function addLocale(raw: string) {
     const locale = raw.trim().toLowerCase();
@@ -377,6 +396,7 @@ export function TasksEditor() {
                   onChange={(e) => patchEntry(idx, e)}
                   onRemove={() => removeEntry(idx)}
                   titleKeyUses={titleKeyUses}
+                  taskNames={taskNames}
                   tx={txWithExtras}
                   pendingTx={pendingTx}
                   setTranslation={setTranslation}
@@ -423,6 +443,8 @@ function TaskCard(props: {
   onRemove: () => void;
   /** docs/NEXT.md item 8 — fetched once by the editor, not per card. */
   titleKeyUses: Record<string, number>;
+  /** Sibling task names — separator evidence for name/key derivation. */
+  taskNames: string[];
   tx: TranslationsSnapshot;
   pendingTx: Record<string, Record<string, string>>;
   setTranslation: (key: string, locale: string, value: string) => void;
@@ -488,11 +510,13 @@ function TaskCard(props: {
           <TaskNameField
             value={getString('name')}
             onChange={(v) => setField('name', { kind: 'string', value: v })}
+            separator={inferTaskSeparator(props.taskNames)}
           />
           <TaskTitleField
             value={getString('title')}
             onChange={(v) => setField('title', { kind: 'string', value: v })}
             taskName={getString('name')}
+            taskNames={props.taskNames}
             sharedWith={Math.max(0, (props.titleKeyUses[getString('title').trim()] ?? 1) - 1)}
             tx={props.tx}
             pendingTx={props.pendingTx}
@@ -742,6 +766,8 @@ function TaskTitleField(props: {
   value: string;
   onChange: (v: string) => void;
   taskName: string;
+  /** Sibling task names — evidence for the derived key's separator. */
+  taskNames: string[];
   /** How many OTHER tasks share this title key (0 = exclusive). */
   sharedWith: number;
   tx: TranslationsSnapshot;
@@ -773,6 +799,7 @@ function TaskTitleField(props: {
   const derivedKey = deriveTaskTitleKey(
     taskName || 'task',
     tx.allKeys.filter((k) => k !== raw),
+    props.taskNames,
   ).key;
   const writeKey = isKey && !resolvesSomewhere && derivedKey ? derivedKey : raw;
 
@@ -785,7 +812,7 @@ function TaskTitleField(props: {
    * a field mid-collection).
    */
   function makeTranslatable() {
-    const { key } = deriveTaskTitleKey(taskName || 'task', tx.allKeys);
+    const { key } = deriveTaskTitleKey(taskName || 'task', tx.allKeys, props.taskNames);
     if (!key) return;
     const primary = tx.locales[0] ?? 'en';
     if (raw !== '') setTranslation(key, primary, raw);
@@ -955,17 +982,23 @@ function PriorityField(props: {
  * to commit the slug. Existing tasks with a hand-picked name are left
  * alone unless the user hits the button.
  */
-function TaskNameField(props: { value: string; onChange: (v: string) => void }) {
+function TaskNameField(props: {
+  value: string;
+  onChange: (v: string) => void;
+  /** The separator this project already uses — see inferTaskSeparator. */
+  separator: '_' | '-';
+}) {
   const [advanced, setAdvanced] = useState<boolean>(false);
   const trimmed = props.value.trim();
   const isValid = trimmed === '' || /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(trimmed);
   const looksLikeIdentifier = isValid && trimmed !== '';
-  // Suggest a slug when the current value is non-identifier-shaped
-  // (has spaces, punctuation, etc). Task ids traditionally allow `-`
-  // in cht-default so we slugify then swap `_` → `-` to match style.
-  const suggested = !looksLikeIdentifier
-    ? slugifyHierarchyId(trimmed).replace(/_/g, '-')
-    : '';
+  // Suggest a slug when the current value is non-identifier-shaped (has
+  // spaces, punctuation, etc). CHT accepts either separator, so we spell the
+  // suggestion the way THIS project already spells its task ids rather than
+  // imposing one. (The comment that used to sit here claimed cht-default
+  // prefers `-`; it does not — `anc.pregnancy_home_visit.known_lmp` — and
+  // that mistake is what put hyphens in our generated title keys.)
+  const suggested = !looksLikeIdentifier ? slugifyTaskName(trimmed, props.separator) : '';
 
   return (
     <label className="expr-field">
