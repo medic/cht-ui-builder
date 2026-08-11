@@ -837,3 +837,127 @@ test('includes: an empty option value still round-trips (no crash, no drop)', ()
   assert.equal(p.rules[0]?.kind, 'report_field_includes');
   assert.equal(serializeAppliesIf(p), src);
 });
+
+/* ===================================================================
+ * docs/principle-config-agnostic.md posture 1 (Preserve): the standard
+ * helpers keep the AUTHOR's argument, because which object the helper
+ * wants is the project's decision.
+ *
+ * Synthetic fixtures distilled from the real spellings on disk — the
+ * configs themselves are deliberately not committed (QA rider).
+ * =================================================================== */
+
+test('helper args: the majority spelling isAlive(contact) survives a no-op save', () => {
+  // What lumbini, nssd, moh-nepal AND our own cht-default template write.
+  // We used to rewrite it to isAlive(contact.contact); cht-default's own
+  // isAlive() takes the wrapper and reads contact.contact.date_of_death
+  // internally, so that rewrite made the helper always falsy and the task
+  // never applied. Valid JS, compiles clean, silently disabled.
+  const src = `function (contact) {
+  if (!isAlive(contact) || isMuted(contact)) { return false; }
+  return true;
+}`;
+  const out = serializeAppliesIf(parseAppliesIf(src));
+  assert.match(out, /!isAlive\(contact\) \|\| isMuted\(contact\)/);
+  assert.equal(/contact\.contact/.test(out), false, 'no invented contact.contact');
+  assert.equal(out, src, 'byte-stable');
+});
+
+test("helper args: gandaki's isAlive(contact.contact) ALSO survives", () => {
+  // The point is not picking the other constant — both spellings are the
+  // project's to keep.
+  const src = `function (contact) {
+  if (!isAlive(contact.contact) || isMuted(contact.contact)) { return false; }
+  return true;
+}`;
+  assert.equal(serializeAppliesIf(parseAppliesIf(src)), src);
+});
+
+test('helper args: a SECOND argument is no longer dropped', () => {
+  // gandaki: isAlive(contact.contact, contact.reports). The structured
+  // is_alive kind used to discard every argument, so this round-tripped to
+  // a one-arg call — a different function call.
+  const src = `function (contact) {
+  if (!isAlive(contact.contact, contact.reports)) { return false; }
+  return true;
+}`;
+  const out = serializeAppliesIf(parseAppliesIf(src));
+  assert.match(out, /isAlive\(contact\.contact, contact\.reports\)/);
+  assert.equal(out, src);
+});
+
+test('helper args: hasError keeps the author\'s report identifier', () => {
+  // moh-nepal has hasError(r) inside a .filter(r => …). Substituting
+  // `report` there changes which object is checked.
+  const src = `function (contact, report) {
+  if (hasError(r)) { return false; }
+  return true;
+}`;
+  assert.equal(serializeAppliesIf(parseAppliesIf(src)), src);
+});
+
+test('helper args: unusual parameter names are respected, not normalised', () => {
+  const src = `function (c, rep) {
+  if (!isAlive(c) || hasError(rep)) { return false; }
+  return true;
+}`;
+  const out = serializeAppliesIf(parseAppliesIf(src));
+  assert.match(out, /!isAlive\(c\) \|\| hasError\(rep\)/);
+  assert.equal(out, src);
+});
+
+test('helper args: a UI-BUILT rule derives its argument from the signature', () => {
+  // No `args` — nothing to preserve — so the serializer takes the shape
+  // from the body it is writing into rather than a hardcoded constant.
+  // Built the way the UI builds one: start from a parsed body, append rules
+  // that carry no authored text.
+  const base = parseAppliesIf(`function (contact, report) {
+  return true;
+}`);
+  const built = serializeAppliesIf({
+    ...base,
+    rules: [
+      { kind: 'is_alive', negated: false },
+      { kind: 'has_error', negated: false },
+      { kind: 'is_task_user' },
+    ],
+    guardGroups: [undefined, undefined, undefined],
+  });
+  assert.match(built, /!isAlive\(contact\)/);
+  assert.match(built, /!hasError\(report\)/);
+  assert.match(built, /!isTaskUser\(user\)/);
+
+  // Same rules, a project that names its params differently.
+  const renamedBase = parseAppliesIf(`function (c, r) {
+  return true;
+}`);
+  const renamed = serializeAppliesIf({
+    ...renamedBase,
+    rules: [
+      { kind: 'is_alive', negated: false },
+      { kind: 'has_error', negated: false },
+    ],
+    guardGroups: [undefined, undefined],
+  });
+  assert.match(renamed, /!isAlive\(c\)/);
+  assert.match(renamed, /!hasError\(r\)/);
+});
+
+test('helper args: negated guards keep the argument too', () => {
+  const src = `function (contact) {
+  if (isMuted(contact)) { return false; }
+  return true;
+}`;
+  assert.equal(serializeAppliesIf(parseAppliesIf(src)), src);
+});
+
+test("helper args: the shipped cht-default template's own appliesIf is stable", () => {
+  // The regression that mattered most: our own template, opened and saved
+  // with no edits, used to have its aliveness check inverted in effect.
+  const src = `function (contact, report) {
+  if (Utils.getField(report, 't_danger_signs_referral_follow_up') !== 'yes') { return false; }
+  if (!isAlive(contact)) { return false; }
+  return true;
+}`;
+  assert.equal(serializeAppliesIf(parseAppliesIf(src)), src);
+});

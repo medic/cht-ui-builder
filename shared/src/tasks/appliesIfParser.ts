@@ -6,7 +6,8 @@
  * Surveyed gandaki + nssd, these are the patterns that show up:
  *
  *   if (!isTaskUser(user)) return false;
- *   if (!isAlive(contact.contact)) return false;
+ *   if (!isAlive(contact.contact)) return false;   // gandaki's spelling
+ *   if (!isAlive(contact)) return false;           // everyone else's
  *   if (isMuted(contact.contact)) return false;
  *   if (hasError(report)) return false;
  *   return contact.contact.role === 'patient';
@@ -21,10 +22,37 @@
  */
 
 export type AppliesIfRule =
-  | { kind: 'is_task_user' }
-  | { kind: 'is_alive'; negated: boolean }
-  | { kind: 'is_muted'; negated: boolean }
-  | { kind: 'has_error'; negated: boolean }
+  /*
+   * The four "standard" CHT helpers. `args` is the author's OWN argument
+   * text, captured verbatim, because which object the helper wants is the
+   * PROJECT's decision, not ours (docs/principle-config-agnostic.md,
+   * posture 1: never emit a token you didn't read).
+   *
+   * Measured across the four real configs plus our own cht-default
+   * template: `isAlive(contact)` is what lumbini, nssd, moh-nepal and
+   * cht-default write; only gandaki writes `isAlive(contact.contact)`, and
+   * gandaki also passes a SECOND argument (`isAlive(contact.contact,
+   * contact.reports)`). Substituting a fixed `contact.contact` was
+   * therefore wrong for four projects out of five and lossy for the fifth.
+   *
+   * It was not cosmetic. cht-default's own tasks-extras.js defines
+   *   function isAlive(contact) {
+   *     return contact && contact.contact && !contact.contact.date_of_death;
+   *   }
+   * i.e. it takes the WRAPPER. Rewriting its call site to
+   * `isAlive(contact.contact)` passes the doc, `contact.contact` is then
+   * undefined, the helper returns falsy, the guard fires and the task
+   * NEVER APPLIES — valid JS that compiles clean and silently disables
+   * the task.
+   *
+   * `undefined` means "the UI built this rule and there is nothing to
+   * preserve"; the serializer then derives the argument from the
+   * function's own parameter names. See {@link defaultHelperArgs}.
+   */
+  | { kind: 'is_task_user'; args?: string }
+  | { kind: 'is_alive'; negated: boolean; args?: string }
+  | { kind: 'is_muted'; negated: boolean; args?: string }
+  | { kind: 'has_error'; negated: boolean; args?: string }
   | { kind: 'helper'; name: string; args: string; negated: boolean }
   | { kind: 'contact_field'; field: string; op: '===' | '!==' | '>' | '<' | '>=' | '<='; value: string }
   | { kind: 'report_field'; field: string; op: '===' | '!==' | '>' | '<' | '>=' | '<='; value: string }
@@ -561,10 +589,13 @@ function classifySimple(expr: string): AppliesIfRule {
   const fn = /^([a-zA-Z_$][\w$]*)\s*\(([^)]*)\)$/.exec(stripped);
   if (fn && fn[1]) {
     const name = fn[1];
-    if (name === 'isTaskUser') return { kind: 'is_task_user' };
-    if (name === 'isAlive') return { kind: 'is_alive', negated };
-    if (name === 'isMuted') return { kind: 'is_muted', negated };
-    if (name === 'hasError') return { kind: 'has_error', negated };
+    // Capture the argument text so serialization can hand it back
+    // unchanged — see the AppliesIfRule docstring.
+    const args = (fn[2] ?? '').trim();
+    if (name === 'isTaskUser') return { kind: 'is_task_user', args };
+    if (name === 'isAlive') return { kind: 'is_alive', negated, args };
+    if (name === 'isMuted') return { kind: 'is_muted', negated, args };
+    if (name === 'hasError') return { kind: 'has_error', negated, args };
     return { kind: 'helper', name, args: fn[2] ?? '', negated };
   }
 
@@ -801,12 +832,14 @@ export function serializeAppliesIf(parsed: ParsedAppliesIf): string {
           else exprRaws.push(t);
           continue;
         }
-        const g = ruleToGuardSource(rule);
+        const g = ruleToGuardSource(rule, parsed.params);
         if (g) lines.push(`  if (${g}) { return false; }`);
       }
       continue;
     }
-    const guards = group.rules.map(ruleToGuardSource).filter((g): g is string => Boolean(g));
+    const guards = group.rules
+      .map((r) => ruleToGuardSource(r, parsed.params))
+      .filter((g): g is string => Boolean(g));
     if (guards.length === 0) continue;
     if (group.orId !== undefined && guards.length > 1) {
       lines.push(`  if (${guards.map((g) => parenFor(g, '&&')).join(' && ')}) { return false; }`);
@@ -831,19 +864,57 @@ export function serializeAppliesIf(parsed: ParsedAppliesIf): string {
   return lines.join('\n');
 }
 
-function ruleToGuardSource(rule: AppliesIfRule): string | null {
+/**
+ * What to pass a standard helper when the UI built the rule and there is no
+ * authored text to preserve. DERIVED from the body's own signature rather
+ * than hardcoded: `appliesIf(contact, report)` gets `isAlive(contact)` /
+ * `hasError(report)`, and a project whose params are `(c, r)` gets
+ * `isAlive(c)` — which is what every real config except gandaki writes, and
+ * is right by construction rather than by coincidence.
+ *
+ * `isTaskUser` is the exception: `user` is a rules-engine global, not a
+ * parameter, so there is nothing to derive it from. All five real
+ * occurrences spell it `user`.
+ */
+function defaultHelperArgs(kind: string, params: readonly string[]): string {
+  switch (kind) {
+    case 'has_error':
+      return params[1] ?? 'report';
+    case 'is_task_user':
+      return 'user';
+    default:
+      return params[0] ?? 'contact';
+  }
+}
+
+/** The author's own argument text, or a signature-derived default. */
+function helperArgs(
+  rule: { kind: string; args?: string },
+  params: readonly string[],
+): string {
+  const authored = rule.args?.trim();
+  return authored ? authored : defaultHelperArgs(rule.kind, params);
+}
+
+function ruleToGuardSource(rule: AppliesIfRule, params: readonly string[]): string | null {
   switch (rule.kind) {
     case 'is_task_user':
-      return `!isTaskUser(user)`;
-    case 'is_alive':
-      return rule.negated ? `isAlive(contact.contact)` : `!isAlive(contact.contact)`;
-    case 'is_muted':
+      return `!isTaskUser(${helperArgs(rule, params)})`;
+    case 'is_alive': {
+      const a = helperArgs(rule, params);
+      return rule.negated ? `isAlive(${a})` : `!isAlive(${a})`;
+    }
+    case 'is_muted': {
       // Rule shape: `negated=true` means the positive requirement is "NOT muted".
       // The guard inverts that: exit if muted, i.e. `isMuted(...)`.
-      return rule.negated ? `isMuted(contact.contact)` : `!isMuted(contact.contact)`;
-    case 'has_error':
+      const a = helperArgs(rule, params);
+      return rule.negated ? `isMuted(${a})` : `!isMuted(${a})`;
+    }
+    case 'has_error': {
       // Same shape as is_muted — guard exits when the error IS present.
-      return rule.negated ? `hasError(report)` : `!hasError(report)`;
+      const a = helperArgs(rule, params);
+      return rule.negated ? `hasError(${a})` : `!hasError(${a})`;
+    }
     case 'helper':
       // Guard form is the INVERSE of the positive rule, same as is_alive:
       // positive "helper must hold" (negated=false) → exit when it

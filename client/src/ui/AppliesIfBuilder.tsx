@@ -381,7 +381,11 @@ function AppliesIfRuleRow(props: {
       return (
         <div className="row gap rule-row">
           <code>User is a task user</code>
-          <span className="muted">(<code>isTaskUser(user)</code>)</span>
+          {/* Show the argument the file actually carries, not a fixed
+              `user` — the serializer now preserves it. */}
+          <span className="muted">
+            (<code>isTaskUser({r.args || 'user'})</code>)
+          </span>
           {remove}
         </div>
       );
