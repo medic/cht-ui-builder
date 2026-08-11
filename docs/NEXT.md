@@ -7,6 +7,25 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 
 # What's next — geriatric use case first
 
+> # ▶ PRODUCT-FIXES-ONLY ORDER (PO, 2026-08-11)
+> **"No code quality or cosmetic fixes — actual product fixes first."** A product fix is one that
+> either **blocks a user from completing the workflow** or **silently produces broken output**.
+> Everything else (lint, CI wiring, test-ids, grid overflow at 4 locales, the scaffold's
+> `true &&`, inter-entry comment loss on task removal) is **parked below the line** until these
+> are done.
+>
+> | | Fix | Why it's product | Size |
+> |---|---|---|---|
+> | **1** | **`cht-default` won't compile** — `require('moment')`, no `package.json` (`server/templates/cht-default/`) | A whole template **cannot deploy at all** out of the box. Ship a `package.json` or vendor a moment-free contact-summary. | **tiny** |
+> | **2** | **The task→form hand-off** — `inputs/user/` mis-placement + the "create the receiving node" affordance + `modifyContent` emitting `report.X` instead of `report.fields.X` | **The only true no-code capability gap left.** Without it the proven workflow needs hand-edits. Spec: `handoff-task-to-form-handoff-2026-08-08.md` | medium |
+> | **3** | **Bilingual task titles (item 8) + `upload-custom-translations` (W2)** | Blocks **17 of the 18** geriatric tasks; W2 is one line and the feature ships nothing without it. | medium |
+> | **4** | **`P1-DEPLOY`** — insert-contact-field emits a form that fails `cht convert` | The tool's own feature produces an **undeployable form**; a no-code user hits a wall they can't diagnose. | small |
+> | **5** | **`P1-LOCALE-SEAT`** — typed choice labels silently dropped on imported configs | **Silent data loss** on 11 real forms, one a live production form. | small |
+>
+> **Fixes 1 and 2 are also the acceptance test for the geriatric epic:** with W1 already fixed,
+> they are the last two of the three interventions in QA's full-arc demo. When both land, **that
+> same video records with zero fixups.**
+
 > ## ⚡ Workflow probe result (QA, 2026-08-08) — **the full loop WORKS live.**
 > Assessment → task → branched follow-up → resolution, built in the tool and proven on a real
 > CHT instance (steps 1–6 green; 7–8 blocked by CouchDB memory pressure, not by the tool).
@@ -15,7 +34,19 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > referral flags (~18 each), ~65 for the task, ~180 for the 12-row follow-up.**
 > Findings filed below as **W1–W6**.
 >
-> ### 🔴 W1 re-opens the parked safety batch — the parking rationale no longer holds
+> ### ✅ W1 FIXED and verified — `b0278b3` (per-entry byte-range splice)
+> Independently reproduced against compiled HEAD: **no-op save is byte-identical on all four
+> templates** (cht-default 8 entries, malaria 1, blank/empty 0); the
+> `generateEventForHomeVisit((i + 1) * 2, 6, 7)` chain survives; comment lines hold **23 → 23**;
+> editing entry 0 leaves **every other entry byte-verbatim** with the `.map` chain intact.
+> Shared suite **646/646**. The serializer moved to `shared/src/tasks/jsSerializer.ts` so the
+> invariant is unit-pinned against the **real templates**, not a tidy fixture.
+> **The dev understated the residual:** they flagged remove/reorder as "still regenerates the
+> array body", but measured, the **remove path preserves entry content verbatim** — the `.map`
+> chain survives — and only **inter-entry comments** are lost (23 → 19). That is cosmetic text
+> loss, not semantic corruption. Fine to leave; note it, don't prioritise it.
+>
+> ### ~~🔴 W1 re-opens the parked safety batch~~ (kept for the record — fixed above)
 > We parked the `appliesIfParser` safety batch on the reasoning that corruption *"only bites when
 > the tool opens pre-existing hand-written JavaScript"* — i.e. imported configs only. **That is
 > now false.** QA reproduced a silent no-op-save corruption of **`server/templates/cht-default/tasks.js`**
