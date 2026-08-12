@@ -179,6 +179,37 @@ dependency map uses.
 
 ---
 
+## Batch A′ — 🔴 emission must survive the project's own lint (added 2026-08-12, from the geriatric-into-NSSD build)
+
+**Nothing the tool authors can ship to a lint-enforcing config today.** `compile-app-settings` runs
+the project's own `@medic` ESLint, and the serializer's `tasks.js` output failed it with **16
+errors** — the deploy did not run at all until a human reformatted the file. Evidence:
+[`reviews/nssd-geriatric-build-2026-08-12.md`](reviews/nssd-geriatric-build-2026-08-12.md) §1.
+
+- `indent` ×13 — bodies emitted at 0/2/8 spaces where this config requires 4/6
+- `brace-style` ×2 — `if (…) { return false; }` collapsed onto one line
+- `no-unused-vars` ×1 — `modifyContent: function (content, contact, report, event)`; we always emit
+  the four-arg signature even when `event` is unused
+
+**Fix shape:** emit in the style of the file we parsed — infer indent width/unit from the existing
+entries and match brace style — or run the project's own `eslint --fix` over the touched byte range
+after splicing. And **omit unused trailing parameters** (emit the shortest signature the body
+actually uses). Prefer inference over a hard-coded 4/6: the point is *the project's* style, not a
+new default of ours. Round-trip test must pin the emitted indentation against a 4-space fixture.
+
+> **⚠️ This reclassifies the "Parked, cosmetic" list below.** We parked *"trailing-comma churn on 6
+> task entries"* and the other formatting churn as **"confirmed harmless at NSSD scale."** That
+> judgement was wrong in one specific way: **formatting is not cosmetic on a config with a lint
+> gate — it is deploy-blocking.** Re-read every parked formatting item through that lens. The
+> corruption items in Batch A are worse because they are *silent*; this one is merely *loud* — but
+> loud-and-blocking still means nothing ships.
+
+**Ordering note.** QA's suggested order puts this first; this doc puts Batch A first. Both are
+right from their own lens and they don't actually conflict: **Batch A stops silent damage to a
+deployed national config, which outranks a loud, obvious failure.** But A′ is small, fully
+independent of A, and without it *nothing authored in the tool reaches NSSD at all* — so it should
+ride along with A rather than queue behind it.
+
 ## Batch B — unblocks the geriatric task (start after A2–A4)
 
 ### B1 — `modifyContent` must emit an access that exists
@@ -208,6 +239,24 @@ It emits hyphenated kebab + `.title`. **0 of 29** NSSD task names and **0 of 29*
 a hyphen; 13/29 are exactly `'task.' + name`. Seed the derivation from the project's dominant shape.
 
 ---
+
+### B5 — Detect imperatively-built contact-summary context (added 2026-08-12)
+The cross-form calculation picker lists only keys it can parse from a structured
+`context: { … }` literal. **NSSD assembles context imperatively** (`getContext()` →
+`context.previous_bmi_ctx = …`), so the picker showed **zero** keys and all three had to be typed
+into the raw editor — a hand-typed identifier, which the no-code bar forbids. A scan found **21
+usable context keys in NSSD that the tool currently reports as none.**
+
+**Tier 1 (do this one — cheap, catches all 21):** also detect `context.<key> = …` assignments in
+`contactSummaryParser`, not just the object literal. Read-only detection; no new emission path, so
+no round-trip risk.
+
+**Tiers 2–3 are a feature idea worth its own decision, not part of this batch:** (2) when connected
+to an instance, execute the deployed contact-summary against a real contact and show the **actual
+value** beside each key, so the author picks *"BMI → 27.6"* rather than guessing an identifier;
+(3) emit into the project's house style rather than ours (same principle as **A′**). Implementation
+note from QA for whoever builds tier 2: the compiled contact-summary is a **UMD bundle** and needs
+global-scope sandboxing to execute.
 
 ## Batch C — tool usability on this config (small, independent)
 
