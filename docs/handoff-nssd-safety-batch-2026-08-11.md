@@ -241,6 +241,7 @@ a hyphen; 13/29 are exactly `'task.' + name`. Seed the derivation from the proje
 ---
 
 ### B5 — Detect imperatively-built contact-summary context (added 2026-08-12)
+> **▶ NOW THE FOCUS (PO, 2026-08-12) and fully specced: [`plans/pick-preexisting-context-values.md`](plans/pick-preexisting-context-values.md).** Read that instead of the summary below — it corrects the rationale, measures why tier 1 is provably incomplete (21 static keys vs at least 3 dynamic families it cannot enumerate), finds the cross-file indirection the detector must follow, and flags a false-positive trap (`contact-summary.templated.js:112`'s card-field `context: {count,total}`) that a file-wide grep would offer as real keys.
 The cross-form calculation picker lists only keys it can parse from a structured
 `context: { … }` literal. **NSSD assembles context imperatively** (`getContext()` →
 `context.previous_bmi_ctx = …`), so the picker showed **zero** keys and all three had to be typed
