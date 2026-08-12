@@ -45,6 +45,29 @@ match gandaki, doesn't match lumbini. It matches only our own `cht-default` scaf
 the project root sits below the git root in **three of four**; and moh-nepal alone runs **seven
 locales**.
 
+### The strongest evidence is our own code, not a customer's
+
+The four templates **we ship** disagree with each other about what `isAlive` wants — same helper
+name, same parameter name, opposite meaning:
+
+| Template | Definition | Therefore wants |
+|---|---|---|
+| `cht-default/tasks-extras.js:11` | `contact && contact.contact && !contact.contact.date_of_death` | the **wrapper** — call it `isAlive(contact)` |
+| `blank/tasks-extras.js:4` | `!contact.date_of_death` | the **raw doc** — call it `isAlive(contact.contact)` |
+| `malaria/contact-summary-extras.js:4` | `function isAlive(c)` — re-exported into `tasks.js` via an explicit `require` | its own third spelling |
+| `empty` | *(no helpers at all)* | no evidence to derive from |
+
+There is no argument the tool could have hardcoded that is correct even across **our own
+templates**. That settles it more cleanly than any customer config can: the argument is not a
+convention to be known, it is a fact to be **read**.
+
+> **Open defect this exposes — `blank`'s helper is always-true under the standard call.**
+> `blank/tasks-extras.js` reads `contact.date_of_death`, but the task engine's `appliesIf` receives
+> the wrapper, so the standard `isAlive(contact)` call reads `undefined` and the guard never fires.
+> It is latent only because `blank/tasks.js` ships no tasks — it bites the moment a user creates
+> their first one, which is precisely the cold-start path. Fix the **helper body** to match
+> `cht-default`; do not "fix" it by making the tool emit a different argument.
+
 ---
 
 ## The three postures
