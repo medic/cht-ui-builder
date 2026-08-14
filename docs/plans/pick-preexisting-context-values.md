@@ -31,6 +31,45 @@ Two distinct capabilities, and we currently have one and a half:
 The picker should offer both in one place — *"here's what your config already computes"* and
 *"…or define a new one"* — because an author doesn't know which situation they're in.
 
+## Scope decision (PO, 2026-08-12): this is ONE feature with the contact-field path included
+
+**Workbook row R3 is the proof case, and it needs both halves at once:**
+
+> `{Person_Name}'s Health Details` — BMI …, blood pressure …, blood sugar …
+
+One row, two kinds of reference: the **patient's name** (a contact field) and the three **computed
+context values**. In the NSSD build QA **deliberately skipped it and marked it "Not built"**, because
+the contact-field half is the P1 that makes `cht convert` fail — *"a real gap, silently dropped."*
+
+So these are not two projects. They are one seam — **"insert a reference to a value that already
+exists"** — with several sources behind one picker:
+
+| Source | State |
+|---|---|
+| An earlier field in this form (`${field}`) | ✅ works |
+| A **contact field** (`patient_name`, `patient_id`) | ⚠️ picker works, **emits an undeployable form** — see below |
+| A **context value the config already computes** | ❌ shows zero on a real config — tiers 1–2 above |
+| A **new** cross-form value | ✅ shipped (Context values tab) |
+
+### The contact-field half — fold in the P1 deploy fix
+Filed as **`P1-DEPLOY`** in `NEXT.md`; do it **as part of this change**, not separately, because R3
+cannot be built without it and because both halves land in the same picker.
+
+The insert creates the harvest `calculate` referencing `../inputs/contact/<field>` but **never
+declares that node inside the `inputs/contact` group**, so pyxform cannot resolve the XPath and
+validation fails. Three parts:
+1. **Generator** (`shared/src/xlsform/insertContactFieldRef.ts`) — also declare the node in
+   `inputs/contact` when absent, in the same undoable patch.
+2. **Preflight** — `danglingRefs.ts` currently treats any `../inputs/*` path as valid **by
+   assumption** ("the runtime injects it"). It doesn't; the node must be declared. Validate against
+   the form's real `inputs` block, so the tool catches this instead of whitelisting it.
+3. **A `cht convert` (pyxform) leg in CI** for anything that generates form rows — this defect was
+   invisible to every on-disk check, and the feature had shipped with nine green flow tests.
+
+**Note the shared shape:** `insertContactFieldRef` is also the machinery to copy for the context-value
+insert — one gesture producing a correctly-placed, deduped, idempotent set of rows in a single
+undoable patch. Fix it once, reuse it for the other source.
+
 ## Measured reality on `config-nssd/chis`
 
 The picker reports **0 keys**. There are **21**. Why we see nothing, and what a fix must handle:
@@ -155,10 +194,27 @@ and translation keys:
 2. **"Not fully detectable"** — when `indeterminate` is non-empty, say it plainly: *"This config
    also builds some values dynamically that we can't list. Connect to an instance to see all of
    them,"* plus a free-text escape. **Never present a partial list as complete.**
-3. **"＋ Define a new value from another form"** — the existing Context values flow, so an author who
+3. **"Contact fields"** — `patient_name`, `patient_id`, … (the fixed contact-field path). Same
+   picker, same one-gesture behaviour, so R3's name and its three values are authored side by side.
+4. **"＋ Define a new value from another form"** — the existing Context values flow, so an author who
    finds nothing suitable isn't stranded.
 
+## Acceptance — R3 is the exit criterion
+Build workbook row **R3** end to end in the UI, with **zero hand-edits**, and ship it:
+1. the patient's name inserted from the picker (no typed `${…}`, no manual `inputs` surgery);
+2. the three values picked from what NSSD already computes (no typed identifiers);
+3. `cht compile-app-settings convert-app-forms` **passes** — the current blocker;
+4. on the instance, the note renders the real name **and** BMI 27.6 / BP 138 / sugar 145 for
+   Devi Kumari Thapa, matching what QA already proved for the values alone.
+
+Until R3 builds and deploys untouched, this feature isn't done — that row is the one QA had to mark
+"Not built."
+
 ## Tests
+- **Contact-field half:** the harvest calc **and** the declared `inputs/contact` node in one patch;
+  idempotent re-insert; a **pyxform conversion test** on the produced form (the check that would have
+  caught the P1); `danglingRefs` now **fails** on an undeclared `../inputs/contact/x` instead of
+  passing it.
 - **Unit** (`contactSummaryParser`): NSSD's real `getContext` shape → **exactly the 21 keys**, with
   `conditional` correct for the `if`-nested ones; the assignment form; bracket-with-string-literal;
   the **cross-file indirection**; `indeterminate` populated for `context[key]` and for the
