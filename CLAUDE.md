@@ -97,6 +97,28 @@ behavior (see `appliesIfParser.roundtrip.test.ts` as the pattern).
   their supported grammar, and **preserve the raw text on save**. Maintain that
   fallback rather than rejecting unparseable input.
 
+## Workflow & subagent cost discipline
+
+Measured from this project's transcript history: ~90% of subagent token spend
+was `Workflow` fan-out running at top model tier, because no `agent()` call
+ever set a model. When authoring a `Workflow` script in this repo, tier every
+stage instead of leaving it to inherit the session model:
+
+```js
+agent(scanPrompt,   { agentType: 'searcher' })      // pure file/symbol location
+agent(logPrompt,    { agentType: 'log-scanner' })   // extract failures from build/test/CI output
+agent(refutePrompt, { model: 'sonnet' })            // redundant "is this real?" voter
+agent(synthPrompt,  { effort: 'high' })             // synthesis / persona lens / final verify
+```
+
+`searcher` and `log-scanner` (both `model: haiku`, read-only tools) are defined
+in `.claude/agents/` — prefer them over `Explore`/`general-purpose` for pure
+search or log-triage fan-out. Reserve top tier for stages that actually make a
+judgment call: synthesis, persona lenses (PO/Designer/QA dogfood), final
+verify/scoping. Full rules and rationale: `docs/workflow-cost-authoring.md`. An
+`agent()` call with no `model`/`effort`/`agentType` and no stated reason it
+needs top tier is the default mistake this section exists to prevent.
+
 ## Out of scope (don't build unless asked)
 
 targets.js (dropped by user decision), SMS/Devanagari forms (preserved, no
