@@ -55,16 +55,53 @@ exists"** — with several sources behind one picker:
 Filed as **`P1-DEPLOY`** in `NEXT.md`; do it **as part of this change**, not separately, because R3
 cannot be built without it and because both halves land in the same picker.
 
-The insert creates the harvest `calculate` referencing `../inputs/contact/<field>` but **never
-declares that node inside the `inputs/contact` group**, so pyxform cannot resolve the XPath and
-validation fails. Three parts:
-1. **Generator** (`shared/src/xlsform/insertContactFieldRef.ts`) — also declare the node in
-   `inputs/contact` when absent, in the same undoable patch.
-2. **Preflight** — `danglingRefs.ts` currently treats any `../inputs/*` path as valid **by
-   assumption** ("the runtime injects it"). It doesn't; the node must be declared. Validate against
-   the form's real `inputs` block, so the tool catches this instead of whitelisting it.
-3. **A `cht convert` (pyxform) leg in CI** for anything that generates form rows — this defect was
-   invisible to every on-disk check, and the feature had shipped with nine green flow tests.
+**The invariant that was broken (QA's framing, and it's the right one): the scaffold writes
+declaration and reference as MATCHED PAIRS.** Verified in `shared/src/xlsform/scaffolds.ts`:
+
+| Declared under `inputs/contact` | Calculate that reads it |
+|---|---|
+| `_id` (`:96`) | `patient_uuid` → `../inputs/contact/_id` (`:100-102`) |
+| `patient_id` (`:97`) | `patient_id` → `../inputs/contact/patient_id` (`:103-105`) |
+
+**Exactly two, both paired — so both always resolve.** `insertContactFieldRef` writes only the
+*reference* half and never touches the group, so **every field beyond those two is a dangling
+XPath.** The config's own hand-written forms work precisely because their authors declared the node
+themselves — `hypertension_referral` and `hypertension_screening` both carry a hidden `name` plus the
+identical calculate.
+
+> **⚠️ An adjacent trap that probably explains how this shipped.** The scaffold *does* contain a
+> `name` row — at `:93`, but under **`inputs/user/name`** (the *username*), not
+> `inputs/contact/name`. Anyone glancing at the scaffold sees `name` and reasonably concludes it's
+> declared. It isn't, for contacts. Worth a comment in the code so the next person doesn't repeat it.
+
+**Blast radius is worse than first recorded.** `validate-app-forms` fails the **entire run** — so a
+single dangling reference in one form blocks **every** form *and* the app settings from deploying:
+```
+ERROR  integrated_health_assessment_form_for_elder_population.xml contains invalid XPath:
+       calculate for /data/patient_name contains [../inputs/contact/name]
+ERROR  One or more forms have failed validation.
+```
+
+**The fix, four parts:**
+1. **Scaffold the standard set** — declare the cht-core contact fields in `inputs/contact` up front
+   (`pregnancy.xlsx` ships `_id`, `name`, `short_name`, `patient_id`, `date_of_birth`, `sex`), which
+   restores the matched-pair invariant for the common cases with no runtime logic at all.
+   **My one refinement:** declare the **nodes**, but keep the harvest **calculates** on demand —
+   otherwise every new form carries six calculates the author never asked for.
+2. **Declare on demand** in `insertContactFieldRef` for anything outside that set, in the same
+   undoable patch — necessary because config-specific fields can't be enumerated ahead of time
+   (NSSD's `c82_person` carries `sickle_cell_test`, `house_number`, …).
+   *Dependency worth knowing:* the field list comes from `contactFieldChoices`, which Batch C reports
+   is **polluted by `PLACE_TYPE-*.xlsx` cht-conf templates** being parsed as real contact forms. Fix
+   that or the on-demand path may offer fields that don't exist.
+3. **Enforce the invariant in preflight, don't just satisfy it.** `danglingRefs.ts` treats any
+   `../inputs/*` path as valid **by assumption** — its docstring says *"the runtime injects it."* It
+   doesn't. Validate against the form's real `inputs` block. **This is the systemic half:** without
+   it, the next feature that writes a reference reintroduces the same class.
+4. **A `validate-app-forms` leg in CI.** This is the *only* check that catches it — the feature
+   shipped with nine green flow tests and a clean typecheck, all blind to it.
+
+**Proven:** adding one hidden `name` row made `validate-app-forms` pass, exit 0, with no other change.
 
 **Note the shared shape:** `insertContactFieldRef` is also the machinery to copy for the context-value
 insert — one gesture producing a correctly-placed, deduped, idempotent set of rows in a single
