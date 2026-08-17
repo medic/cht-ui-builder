@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { getProjectPath, setProjectPath } from '../state.js';
+import { isPlaceholderFormFile } from '@cht-ui/shared';
 import { getParsedForm, directorySignature } from '../parsedFormCache.js';
 
 /** Minimal shape returned to the client when describing a project. */
@@ -94,7 +95,15 @@ async function scanContactFieldChoices(
     contactChoicesCache.set(projectPath, { signature, choices: {} });
     return {};
   }
-  const xlsxFiles = entries.filter((e) => e.toLowerCase().endsWith('.xlsx'));
+  const xlsxFiles = entries
+    .filter((e) => e.toLowerCase().endsWith('.xlsx'))
+    // `PLACE_TYPE-create.xlsx` is cht-conf's place-type SCAFFOLD, not a
+    // contact form — the literal token is substituted when someone adds a
+    // place type, and it is the only contact form cht-conf never compiles to
+    // .xml. Parsing it as real leaked 11 choice values that exist on no
+    // actual contact into this map (measured on gandaki and on our own
+    // cht-default template). See shared/src/xlsform/placeholderForms.ts.
+    .filter((e) => !isPlaceholderFormFile(e));
   // Parallelize per-form parsing (mirrors the forms.ts listing pattern).
   // Per-form parse routes through the shared cache; cold-start does N
   // parses, warm reads do N stats.

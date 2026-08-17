@@ -9,6 +9,7 @@
  * which one is "patient name".
  */
 import { useEffect, useState } from 'react';
+import { isPlaceholderFormFile } from '@cht-ui/shared';
 import { api } from '../api.js';
 import { useApp } from '../state/store.js';
 import type { ContactFormFields } from './FieldPicker.js';
@@ -58,6 +59,16 @@ async function loadAll(entries: Array<{ id: string }>): Promise<ContactFormField
   // and other requests (like the one the user actually clicked) stay snappy.
   const out: ContactFormFields[] = [];
   for (const f of entries) {
+    // Skip cht-conf's place-type SCAFFOLD. `PLACE_TYPE-create.xlsx` is not a
+    // contact form — the token is substituted when a place type is added, and
+    // it is the only contact form cht-conf never compiles. Its placeholder
+    // questions contributed 18 field names on gandaki and 14 on our own
+    // cht-default template that exist on no real contact
+    // (`custom_place_name_label_translator`, `generated_name_translation_temp`,
+    // …). That got worse once picking a contact field started DECLARING it:
+    // picking a phantom would write a real-looking inputs/contact node for a
+    // field no contact has. See shared/src/xlsform/placeholderForms.ts.
+    if (isPlaceholderFormFile(f.id)) continue;
     try {
       const res = await api.getForm(f.id);
       const fields = res.form.survey
