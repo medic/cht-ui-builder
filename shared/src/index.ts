@@ -42,6 +42,7 @@ export * from './fhir/snomedFilter.js';
 export * from './conditionBuilder/conditionReducer.js';
 export * from './translations/propertiesParser.js';
 export * from './contactSummary/cardsParser.js';
+export * from './contactSummary/contextKeyDiscovery.js';
 export * from './preflight/index.js';
 // NOTE: ./fhir/loadStarterPack.ts is intentionally NOT re-exported. It
 // imports `node:fs` and is Node-only — re-exporting would break the client
