@@ -444,18 +444,28 @@ const FALLBACK_CONTACT_FIELDS: ReadonlyArray<string> = [
 const CONTEXT_WRAPPER_LABELS: Record<ContextWrapper, string> = {
   none: 'Just the value',
   'fallback-to-current': 'Use my current answer if empty',
+  'guarded-fallback': 'Use my current answer if not set',
+  coalesce: 'First one that has a value',
   'read-once': 'Read once',
 };
 
 /** §H4 — plain-language help text for each wrapper option, surfaced as a
  *  one-line description under the wrapper select. Bhishan couldn't tell
- *  what "Read once" meant; these read for a non-coder. */
+ *  what "Read once" meant; these read for a non-coder.
+ *
+ *  `guarded-fallback` and `coalesce` were added once measurement showed
+ *  they are 58 of the 132 real context reads on disk — and the only idiom
+ *  two of the four configs use at all. See calcReference.ts. */
 const CONTEXT_WRAPPER_HELP: Record<ContextWrapper, string> = {
   none: 'Read the value from the contact summary every time the form is opened.',
   'fallback-to-current':
-    "If the contact summary has a value, use it; otherwise keep whatever the user has typed here. Example: `if(ctx, ctx, .)`.",
+    'If the contact summary has a value, use it; otherwise keep whatever the user has typed here. Example: `if(ctx, ctx, .)`.',
+  'guarded-fallback':
+    'Same as above, but tests explicitly for "not set" first. This is the spelling most configs use. Example: `if(ctx != \'\', ctx, .)`.',
+  coalesce:
+    'Use the contact-summary value if it has one, otherwise keep the current answer — written as one function. Example: `coalesce(ctx, .)`.',
   'read-once':
-    "Read the value the first time the form is opened; the user can then edit it without it being overwritten. Example: `once(ctx)`.",
+    'Read the value the first time the form is opened; the user can then edit it without it being overwritten. Example: `once(ctx)`.',
 };
 
 function SingleValuePanel(props: {

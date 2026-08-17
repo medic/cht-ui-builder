@@ -70,6 +70,8 @@ const CONTEXT_WRAPPER_LABELS: Record<ContextWrapper, string> = {
   none: 'bare',
   'read-once': 'once(…) (read once)',
   'fallback-to-current': 'if(…, …, .) (fallback to current)',
+  'guarded-fallback': "if(… != '', …, .) (fallback, explicit)",
+  coalesce: 'coalesce(…, .) (first with a value)',
 };
 
 const CONTEXT_WRAPPER_HELP: Record<ContextWrapper, string> = {
@@ -78,6 +80,10 @@ const CONTEXT_WRAPPER_HELP: Record<ContextWrapper, string> = {
     'Wrap in once(...) so the value is read on form-load only — useful for snapshotting LMP / EDD / measurements that should not flicker as the user edits.',
   'fallback-to-current':
     'Read the context value if present, else keep the current form answer (XForms `if(ref, ref, .)`).',
+  'guarded-fallback':
+    "Same intent as the fallback above, written with an explicit emptiness test — `if(ref != '', ref, .)`. The most common spelling in real configs, and the only one some use.",
+  coalesce:
+    'Read the context value if it has one, else keep the current answer, written as a single XPath function — `coalesce(ref, .)`.',
 };
 
 const OPERATORS: Operator[] = ['=', '!=', '>', '<', '>=', '<='];

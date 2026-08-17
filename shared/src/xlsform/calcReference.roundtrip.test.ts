@@ -49,7 +49,12 @@ test('Bucket A — contact-input emit/recognize round-trip', () => {
   const s = emitContactInput('_id');
   assert.equal(s, '../inputs/contact/_id');
   const r = recognizeReference(s);
-  assert.deepEqual(r, { kind: 'contact-input', argument: '_id', wrapper: 'none' });
+  assert.deepEqual(r, {
+    kind: 'contact-input',
+    argument: '_id',
+    wrapper: 'none',
+    sentinel: null,
+  });
   // And the parent self-check preserves the bytes.
   const parsed = parseCalculation(s);
   assert.equal(parsed.shape, 'single');
@@ -60,7 +65,12 @@ test('Bucket A — contact-summary (bare) emit/recognize round-trip', () => {
   const s = emitContactSummary('glucometer_ctx', 'none');
   assert.equal(s, "instance('contact-summary')/context/glucometer_ctx");
   const r = recognizeReference(s);
-  assert.deepEqual(r, { kind: 'contact-summary', argument: 'glucometer_ctx', wrapper: 'none' });
+  assert.deepEqual(r, {
+    kind: 'contact-summary',
+    argument: 'glucometer_ctx',
+    wrapper: 'none',
+    sentinel: null,
+  });
   const parsed = parseCalculation(s);
   assert.equal(parsed.shape, 'single');
   assert.equal(serializeCalculation(parsed), s);
@@ -77,6 +87,7 @@ test('Bucket A — contact-summary fallback-to-current emit/recognize round-trip
     kind: 'contact-summary',
     argument: 'glucometer_ctx',
     wrapper: 'fallback-to-current',
+    sentinel: null,
   });
   // parseCalculation may classify this as decision_table (the if-shape) OR
   // raw (the self-check demoted it). Either way the bytes survive.
@@ -92,6 +103,7 @@ test('Bucket A — contact-summary read-once emit/recognize round-trip', () => {
     kind: 'contact-summary',
     argument: 'previous_bmi_ctx',
     wrapper: 'read-once',
+    sentinel: null,
   });
   const parsed = parseCalculation(s);
   assert.equal(parsed.shape, 'single');
@@ -102,7 +114,12 @@ test('Bucket A — bare ${field} field-ref recognize', () => {
   const s = emitFieldRef('lmp_date');
   assert.equal(s, '${lmp_date}');
   const r = recognizeReference(s);
-  assert.deepEqual(r, { kind: 'field-ref', argument: 'lmp_date', wrapper: 'none' });
+  assert.deepEqual(r, {
+    kind: 'field-ref',
+    argument: 'lmp_date',
+    wrapper: 'none',
+    sentinel: null,
+  });
 });
 
 test('Bucket A — every emit/recognize is a fixpoint (re-emit identical string)', () => {
@@ -311,7 +328,12 @@ test('Wave 3 · Note 6 — cross-form bridge fallback-to-current round-trips thr
 
   // Re-hydrate through the recognizer.
   const r = recognizeReference(emitted);
-  assert.deepEqual(r, { kind: 'contact-summary', argument: 'bmi', wrapper: 'fallback-to-current' });
+  assert.deepEqual(r, {
+    kind: 'contact-summary',
+    argument: 'bmi',
+    wrapper: 'fallback-to-current',
+    sentinel: null,
+  });
 
   // Byte-stable through the parent calc engine (parseCalculation +
   // serializeCalculation self-check §3.1 — the picker relies on this
