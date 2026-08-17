@@ -3,7 +3,13 @@
  *
  * Pins:
  *   - `${x}` where x is a same-form row name → passes
- *   - `${../inputs/foo}` and `${../inputs/contact/_id}` → passes
+ *   - a `../inputs/…` reference passes IFF the form declares that node.
+ *     It used to pass unconditionally, on the assumption that "the runtime
+ *     injects it". Measured across 200-plus real forms, the only injected
+ *     subtree is `inputs/meta/*`; everything else — all of `contact/*`,
+ *     `user/*`, `source` — is declared in every real form that uses it, and
+ *     an undeclared one makes cht-conf's validate-app-forms reject the
+ *     entire project. See the rule's module doc.
  *   - `${nonexistent}` → error result
  *   - empty braces `${}` / `${ }` → error result ("empty reference")
  *   - refs are scanned in relevant / calculation / constraint / etc.
@@ -16,6 +22,7 @@ import { strict as assert } from 'node:assert';
 
 import { runDanglingRefsRule } from './danglingRefs.js';
 import { mkContext, mkForm, surveyRow } from './testFixtures.js';
+import type { SurveyRow } from '../../xlsform/types.js';
 
 test('ref to a known same-form name passes', () => {
   const form = mkForm([
@@ -25,25 +32,126 @@ test('ref to a known same-form name passes', () => {
   assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])), []);
 });
 
-test('ref into ../inputs/* passes (runtime-injected)', () => {
+/** The standard CHT inputs block, as the scaffold now emits it. */
+function inputsBlock(contactFields: string[] = ['_id', 'patient_id', 'name']): SurveyRow[] {
+  return [
+    surveyRow('begin group', 'inputs'),
+    surveyRow('hidden', 'source'),
+    surveyRow('begin group', 'user'),
+    surveyRow('hidden', 'contact_id'),
+    surveyRow('hidden', 'name'),
+    surveyRow('end group', 'user'),
+    surveyRow('begin group', 'contact'),
+    ...contactFields.map((f) => surveyRow('hidden', f)),
+    surveyRow('end group', 'contact'),
+    surveyRow('end group', 'inputs'),
+  ];
+}
+
+test('a DECLARED ../inputs/contact/* reference passes', () => {
   const form = mkForm([
-    surveyRow('note', 'msg', { calculation: '${../inputs/patient_name}' }),
+    ...inputsBlock(),
+    surveyRow('calculate', 'patient_uuid', { calculation: '../inputs/contact/_id' }),
+    surveyRow('calculate', 'patient_name', { calculation: '../inputs/contact/name' }),
   ]);
   assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])), []);
 });
 
-test('ref into ../inputs/contact/* passes', () => {
+test('an UNDECLARED ../inputs/contact/* ref is now an error — the deploy blocker', () => {
+  // The exact cell that failed the whole NSSD run:
+  //   ERROR  …_for_elder_population.xml contains invalid XPath:
+  //          calculate for /data/patient_name contains [../inputs/contact/name]
+  // A BARE xpath with no braces, which this rule previously never scanned.
+  const bad = surveyRow('calculate', 'patient_sex', { calculation: '../inputs/contact/sex' });
+  const form = mkForm([...inputsBlock(), bad]);
+  const results = runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }]));
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.severity, 'error');
+  assert.equal(results[0]?.rowId, bad.rowId);
+  assert.equal(results[0]?.column, 'calculation');
+  assert.match(results[0]?.message ?? '', /inputs\/contact\/sex/);
+  assert.match(results[0]?.message ?? '', /validate-app-forms/);
+});
+
+test('the braced spelling is judged the same way, and reported once', () => {
   const form = mkForm([
-    surveyRow('calculate', 'patient_id', { calculation: '${../inputs/contact/_id}' }),
+    ...inputsBlock(),
+    surveyRow('calculate', 'a', { calculation: '${../inputs/contact/name}' }),
+    surveyRow('calculate', 'b', { calculation: '${../inputs/contact/sex}' }),
+  ]);
+  const results = runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }]));
+  assert.equal(results.length, 1, 'declared one passes; undeclared one reported exactly once');
+  assert.match(results[0]?.message ?? '', /inputs\/contact\/sex/);
+});
+
+test('the ../ step count is irrelevant — only the path inside inputs matters', () => {
+  // A cell two groups deep legitimately needs `../../../inputs/user/name`.
+  // The step count depends on where the cell sits, not on which node is
+  // meant, so it must not change the verdict either way.
+  for (const prefix of ['../', '../../', '../../../']) {
+    const ok = mkForm([
+      ...inputsBlock(),
+      surveyRow('calculate', 'created_by', { calculation: `${prefix}inputs/user/name` }),
+    ]);
+    assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: ok }])), [], prefix);
+
+    const bad = mkForm([
+      ...inputsBlock(),
+      surveyRow('calculate', 'nope', { calculation: `${prefix}inputs/user/nonexistent` }),
+    ]);
+    assert.equal(
+      runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: bad }])).length,
+      1,
+      prefix,
+    );
+  }
+});
+
+test('inputs/meta/* needs no declaration — measured, it really is injected', () => {
+  // cht-core's own PLACE_TYPE-create.xlsx contains
+  //   concat(../../inputs/meta/location/lat, concat(' ', …/long))
+  // with no `meta` group declared anywhere, and it deploys. 31 forms across
+  // the four real configs and our four templates do this, so requiring a
+  // declaration here would flag all of them — including our own.
+  const form = mkForm([
+    ...inputsBlock(),
+    surveyRow('calculate', 'geolocation', {
+      calculation:
+        "concat(../../inputs/meta/location/lat, concat(' ', ../../inputs/meta/location/long))",
+    }),
   ]);
   assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])), []);
 });
 
-test('deeper ../../inputs/* prefix is also accepted', () => {
+test('a top-level question named `name` does NOT satisfy inputs/contact/name', () => {
+  // The distinction a flattened name-set cannot make: these are different
+  // nodes and only one of them makes the xpath resolve.
   const form = mkForm([
-    surveyRow('calculate', 'name', { calculation: '${../../inputs/user/name}' }),
+    surveyRow('begin group', 'inputs'),
+    surveyRow('begin group', 'contact'),
+    surveyRow('hidden', '_id'),
+    surveyRow('end group', 'contact'),
+    surveyRow('end group', 'inputs'),
+    surveyRow('string', 'name'),
+    surveyRow('calculate', 'patient_name', { calculation: '../inputs/contact/name' }),
   ]);
-  assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])), []);
+  assert.equal(
+    runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])).length,
+    1,
+    'the decoy must not satisfy the reference',
+  );
+});
+
+test('a `contact` group outside inputs does not declare inputs/contact/*', () => {
+  const form = mkForm([
+    surveyRow('begin group', 'household'),
+    surveyRow('begin group', 'contact'),
+    surveyRow('hidden', 'sex'),
+    surveyRow('end group', 'contact'),
+    surveyRow('end group', 'household'),
+    surveyRow('calculate', 'patient_sex', { calculation: '../inputs/contact/sex' }),
+  ]);
+  assert.equal(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])).length, 1);
 });
 
 test('unknown ref → error with column populated', () => {

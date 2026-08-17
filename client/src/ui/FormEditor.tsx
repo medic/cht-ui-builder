@@ -2010,6 +2010,23 @@ function SurveyRowCard(props: {
         : (row.labels[locale] ?? '').length;
     const result = insertContactFieldRef(props.form, contactField);
     if (!result.harvestName) return;
+    // P1-DEPLOY: the helper now writes the `inputs/contact` DECLARATION as
+    // well as the harvest calculate, in the same returned form, so the
+    // single `props.patch` below keeps one gesture = one undo. When it
+    // could not declare (no inputs/contact group, or a nested path) it says
+    // why, and that has to reach the author — silently emitting a reference
+    // that fails `validate-app-forms` for the whole project is exactly how
+    // this shipped the first time.
+    if (result.undeclarableReason) {
+      const formBefore = props.form;
+      showUndoToast({
+        message: `Inserted, but: ${result.undeclarableReason}`,
+        // Undo re-patches the form as it was before this insert. Longer
+        // dwell than the default 6s because this one has to be read.
+        onUndo: () => props.patch(formBefore),
+        durationMs: 12000,
+      });
+    }
     const token = `\${${result.harvestName}}`;
     const nextForm = {
       ...result.form,

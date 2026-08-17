@@ -24,9 +24,11 @@ import { findStructuralViolations } from './structuralBalance.js';
 import { parseXlsForm } from './parse.js';
 import { serializeXlsForm } from './serialize.js';
 
-test('B1 app scaffold — inputs block has the 16 canonical rows', () => {
+test('B1 app scaffold — inputs block has the 17 canonical rows', () => {
   const f = buildAppFormScaffold({ basename: 'pregnancy_visit' });
-  assert.equal(f.survey.length, 16, 'app scaffold survey row count');
+  // 17 since `hidden name` joined inputs/contact — the row whose absence
+  // made every "insert the patient's name" emit an undeployable form.
+  assert.equal(f.survey.length, 17, 'app scaffold survey row count');
   // Spot-check shape: the begin group at idx 0 is `inputs` with field-list +
   // the `./source = 'user'` relevant.
   assert.equal(f.survey[0]!.type, 'begin group');

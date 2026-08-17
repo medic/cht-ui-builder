@@ -21,12 +21,50 @@
  * inputs plumbing area"; the deployable xpath semantics force placement
  * as an `inputs` sibling.
  *
+ * ## The half that was missing (P1-DEPLOY)
+ *
+ * This helper used to write ONLY the reference. The scaffold declares
+ * exactly `_id` and `patient_id` under `inputs/contact`, each with its
+ * matching calculate — which is why those two resolved and nothing else
+ * did. Picking any other contact field emitted `../inputs/contact/<field>`
+ * pointing at a node no form declared, and `validate-app-forms` fails the
+ * ENTIRE run, so one bad reference in one form blocked every form and the
+ * app settings from deploying:
+ *
+ *   ERROR  …_form_for_elder_population.xml contains invalid XPath:
+ *          calculate for /data/patient_name contains [../inputs/contact/name]
+ *   ERROR  One or more forms have failed validation.
+ *
+ * The invariant, in QA's framing: **the scaffold writes declaration and
+ * reference as MATCHED PAIRS.** Measured over the four real configs' app
+ * forms, every single `../inputs/*` reference is declared — zero exceptions
+ * — so real configs hold that invariant and the tool was the only thing
+ * that didn't. `contact/name` alone is declared in 60 forms and referenced
+ * in 68.
+ *
+ * The trap that probably explains how it shipped: the scaffold DOES contain
+ * a `name` row, but under `inputs/user/name` — the logged-in user's
+ * username, a different group entirely. Anyone glancing at the scaffold
+ * sees `name` and reasonably concludes it is declared. It wasn't, for
+ * contacts.
+ *
+ * So: `name` now ships in the scaffold, and anything outside that set is
+ * declared on demand here, in the SAME returned form so one gesture stays
+ * one undo.
+ *
  * Contract:
+ *   - **Declares what it references.** A hidden row for `<field>` is added
+ *     under `inputs/contact` when it isn't there already. When it cannot be
+ *     (no such group, or a nested path), `undeclarableReason` says so
+ *     instead of quietly emitting a reference that will dangle.
  *   - **Deduped by calculation cell.** If any existing `calculate` row
  *     already carries `../inputs/contact/<field>`, we reuse its `name` and
- *     do NOT insert a duplicate row. Re-picking the same contact field is
- *     therefore a no-op that returns the SAME form instance (referential
- *     equality) — callers can fast-path on `result.form === form`.
+ *     do NOT insert a duplicate row. Re-picking the same contact field on a
+ *     form that is already correct returns the SAME form instance, so
+ *     callers can still fast-path on `result.form === form` — it now means
+ *     "nothing needed doing". A form whose calc exists but whose
+ *     declaration does not gets the declaration added, and so returns a new
+ *     instance: that is the repair path for forms the tool broke earlier.
  *   - **Name-collision-safe.** If the derived name (`patient_<field>`) is
  *     already used by a DIFFERENT row (a pre-existing row named
  *     `patient_name` that harvests something else, or a user-authored
@@ -46,9 +84,10 @@ import type { SurveyRow, XLSForm } from './types.js';
 
 /** Result of {@link insertContactFieldRef}. */
 export interface InsertContactFieldRefResult {
-  /** The updated form. Referentially equal to the input when the calc row
-   *  already existed (dedupe short-circuit) — callers may fast-path on
-   *  identity. */
+  /** The updated form. Referentially equal to the input only when there was
+   *  NOTHING to do — the calc row existed AND the input was already
+   *  declared. Callers may still fast-path on identity; it now means "no
+   *  change", which is what they actually wanted it to mean. */
   form: XLSForm;
   /** The name of the harvest calc row — either the freshly-created one or
    *  the pre-existing dedup target. This is the `name` the caller should
@@ -63,6 +102,32 @@ export interface InsertContactFieldRefResult {
    *  to fall back to a numeric suffix. The caller can surface this as a
    *  soft warning ("saved as `patient_name_2`"). */
   hadNameCollision: boolean;
+  /**
+   * `true` iff a hidden DECLARATION row was added under `inputs/contact`
+   * because the field wasn't declared there yet. This is the half that was
+   * missing and made the emitted form undeployable — see the module doc.
+   *
+   * Note this also fires on a form whose harvest calc already exists but
+   * whose declaration does not, i.e. a form the tool previously broke: the
+   * insert repairs it. That is the one case where the dedupe path returns a
+   * NEW form object rather than the input, so the referential-equality
+   * fast-path means "nothing needed doing", not merely "the calc existed".
+   */
+  declaredInput: boolean;
+  /**
+   * `null` when the emitted reference is guaranteed to resolve. Otherwise a
+   * plain sentence saying why the declaration could not be written, for the
+   * caller to surface.
+   *
+   * We do NOT silently emit a reference we know will dangle — that is how
+   * this shipped in the first place — but neither do we invent an `inputs`
+   * or `contact` group in a form that has none, because the group carries
+   * runtime meaning (`_id` with `appearance: select-contact` is what makes
+   * CHT populate the block) and guessing at it would be a bigger
+   * fabrication than declining. The preflight dangling-ref rule catches the
+   * same case, so the author is told either way.
+   */
+  undeclarableReason: string | null;
 }
 
 /**
@@ -114,6 +179,64 @@ function findInsertAfterInputsEnd(survey: SurveyRow[]): number {
 }
 
 /**
+ * Locate the `contact` group nested directly inside the outermost `inputs`
+ * group, returning the index of its `end group` row — the point a new
+ * declaration is spliced in front of.
+ *
+ * Returns `-1` when there is no such group. Only the outermost `inputs` is
+ * considered, and only a `contact` group at its top level; a `contact` group
+ * somewhere else in the survey is not the CHT plumbing block and writing
+ * into it would not make `../inputs/contact/<field>` resolve.
+ */
+function findInputsContactEnd(survey: SurveyRow[]): number {
+  const stack: string[] = [];
+  for (let i = 0; i < survey.length; i++) {
+    const r = survey[i]!;
+    const t = r.type.trim().toLowerCase();
+    if (t === 'begin group' || t === 'begin repeat') {
+      stack.push(r.name);
+      continue;
+    }
+    if (t === 'end group' || t === 'end repeat') {
+      const closed = stack.pop();
+      // `contact` closing while `inputs` is the only thing still open.
+      if (closed === 'contact' && stack.length === 1 && stack[0] === 'inputs') {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Is `field` already declared as a row inside `inputs/contact`?
+ *
+ * SCOPED on purpose. A survey-wide name check would answer the wrong
+ * question in both directions: a top-level question named `name` does not
+ * make `../inputs/contact/name` resolve, and the scaffold legitimately
+ * carries `patient_id` twice — once as the declared input and once as the
+ * top-level harvest calc — which a global check would read as a collision.
+ */
+function isDeclaredInInputsContact(survey: SurveyRow[], field: string): boolean {
+  const stack: string[] = [];
+  for (const r of survey) {
+    const t = r.type.trim().toLowerCase();
+    if (t === 'begin group' || t === 'begin repeat') {
+      stack.push(r.name);
+      continue;
+    }
+    if (t === 'end group' || t === 'end repeat') {
+      stack.pop();
+      continue;
+    }
+    if (stack.length === 2 && stack[0] === 'inputs' && stack[1] === 'contact' && r.name === field) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Ensure the harvest `calculate` row for `contactField` exists in `form`
  * and return the name to splice into the caller's label.
  *
@@ -125,18 +248,92 @@ export function insertContactFieldRef(
 ): InsertContactFieldRefResult {
   const field = contactField.trim();
   if (!field) {
-    return { form, harvestName: '', wasCreated: false, hadNameCollision: false };
+    return {
+      form,
+      harvestName: '',
+      wasCreated: false,
+      hadNameCollision: false,
+      declaredInput: false,
+      undeclarableReason: null,
+    };
   }
 
   const targetCalc = `../inputs/contact/${field}`;
 
+  /* ---- the declaration half: make sure `../inputs/contact/<field>` exists.
+   *
+   * This runs BEFORE the calc work so both halves land in the one returned
+   * form, which is what gives the caller atomic undo for a single "insert
+   * contact field" gesture.
+   */
+  let working = form;
+  let declaredInput = false;
+  let undeclarableReason: string | null = null;
+
+  if (!isDeclaredInInputsContact(form.survey, field)) {
+    if (field.includes('/')) {
+      // A nested path like `parent/_id`. Real configs do declare these
+      // (`contact/parent/_id` appears in 16 forms), but placing one means
+      // synthesising the intermediate groups, and the pickers only ever
+      // offer flat field names — so refuse loudly rather than guess.
+      undeclarableReason =
+        `"${field}" is a nested path. Declare it under inputs/contact yourself, ` +
+        `or the reference will not resolve.`;
+    } else {
+      const endIdx = findInputsContactEnd(form.survey);
+      if (endIdx < 0) {
+        undeclarableReason =
+          'This form has no inputs/contact group, so the contact field cannot be ' +
+          'declared. Add the standard inputs block first, or the reference will ' +
+          'not resolve.';
+      } else {
+        // Empty per-locale labels, matching the harvest calc below: a hidden
+        // plumbing row has no user-facing text, and inventing an English
+        // label would push a token the project never wrote into a config
+        // that may not be in English.
+        const labels: Record<string, string> = {};
+        for (const loc of form.surveyHeaders.labelLocales) labels[loc] = '';
+        if (Object.keys(labels).length === 0) labels['en'] = '';
+
+        const declRow: SurveyRow = {
+          rowId: `input_contact_${field}_${form.survey.length + 1}`,
+          type: 'hidden',
+          name: field,
+          labels,
+          extras: {},
+        };
+        working = {
+          ...form,
+          survey: [
+            ...form.survey.slice(0, endIdx),
+            declRow,
+            ...form.survey.slice(endIdx),
+          ],
+        };
+        declaredInput = true;
+      }
+    }
+  }
+  // From here on, `working` is the form under construction — the parameter
+  // is left alone so the "pure, never mutates the input" contract is
+  // obvious at a glance.
+
   // Dedup by calc cell: if any existing calculate row carries this exact
-  // reference, reuse it — no new row and no name change.
-  for (const r of form.survey) {
+  // reference, reuse it — no new row and no name change. Note this returns
+  // `working`, not the input: a form whose calc exists but whose
+  // declaration did not still gets repaired here.
+  for (const r of working.survey) {
     if (r.type.trim().toLowerCase() !== 'calculate') continue;
     const c = (r.extras['calculation'] ?? '').trim();
     if (c === targetCalc) {
-      return { form, harvestName: r.name, wasCreated: false, hadNameCollision: false };
+      return {
+        form: working,
+        harvestName: r.name,
+        wasCreated: false,
+        hadNameCollision: false,
+        declaredInput,
+        undeclarableReason,
+      };
     }
   }
 
@@ -144,8 +341,11 @@ export function insertContactFieldRef(
   // used by a row that is NOT our dedupe target (we already ruled that
   // out above).
   const defaultName = deriveHarvestName(field);
+  // Survey-wide for the HARVEST name, which is a top-level row and so
+  // really does share one namespace with every other top-level question.
+  // (The declaration check above is scoped instead — different question.)
   const usedNames = new Set<string>();
-  for (const r of form.survey) {
+  for (const r of working.survey) {
     if (r.name) usedNames.add(r.name);
   }
   let harvestName = defaultName;
@@ -177,7 +377,7 @@ export function insertContactFieldRef(
   // rows). The harvest calc has no user-facing label, but an empty per-
   // locale cell keeps the missing-glyph logic uniform.
   const labels: Record<string, string> = {};
-  for (const loc of form.surveyHeaders.labelLocales) {
+  for (const loc of working.surveyHeaders.labelLocales) {
     labels[loc] = '';
   }
   // If the form has no locales configured yet (edge — new blank form),
@@ -188,7 +388,7 @@ export function insertContactFieldRef(
     // Deterministic-enough rowId; the parser regenerates rowIds anyway
     // (they aren't persisted to xlsx), so uniqueness within the session
     // is all that's needed.
-    rowId: `harvest_${harvestName}_${form.survey.length + 1}`,
+    rowId: `harvest_${harvestName}_${working.survey.length + 1}`,
     type: 'calculate',
     name: harvestName,
     labels,
@@ -198,19 +398,21 @@ export function insertContactFieldRef(
   // Placement — right after the outermost `end group inputs`. If there's
   // no `inputs` block at all, append at the end (the caller's form is
   // unusual, but we still produce a syntactically valid survey).
-  let insertAt = findInsertAfterInputsEnd(form.survey);
-  if (insertAt < 0) insertAt = form.survey.length;
+  let insertAt = findInsertAfterInputsEnd(working.survey);
+  if (insertAt < 0) insertAt = working.survey.length;
 
   const nextSurvey = [
-    ...form.survey.slice(0, insertAt),
+    ...working.survey.slice(0, insertAt),
     newRow,
-    ...form.survey.slice(insertAt),
+    ...working.survey.slice(insertAt),
   ];
 
   return {
-    form: { ...form, survey: nextSurvey },
+    form: { ...working, survey: nextSurvey },
     harvestName,
     wasCreated: true,
     hadNameCollision,
+    declaredInput,
+    undeclarableReason,
   };
 }

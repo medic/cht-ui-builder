@@ -506,7 +506,26 @@ test('§5b — dedupe reuses ANY existing row with the same calculation, even if
   const result = insertContactFieldRef(form, 'name');
   assert.equal(result.wasCreated, false);
   assert.equal(result.harvestName, 'patient_uuid');
-  assert.equal(result.form, form, 'dedupe short-circuits to referential equality');
+  // The fixture declares `_id` and `patient_id` but not `name`, so this is
+  // the repair path (P1-DEPLOY): the calc is reused, and the MISSING
+  // declaration is added — which means a new form instance. Referential
+  // equality now means "nothing needed doing", so it correctly does not
+  // hold here.
+  assert.equal(result.declaredInput, true, 'the undeclared node is declared');
+  assert.notEqual(result.form, form);
+  // No duplicate calc, which is what this test is really about.
+  const calcs = result.form.survey.filter(
+    (r) =>
+      r.type.trim().toLowerCase() === 'calculate' &&
+      (r.extras['calculation'] ?? '').trim() === '../inputs/contact/name',
+  );
+  assert.equal(calcs.length, 1);
+  assert.equal(calcs[0]!.name, 'patient_uuid');
+
+  // And once the form is correct, re-picking IS referentially equal.
+  const again = insertContactFieldRef(result.form, 'name');
+  assert.equal(again.form, result.form, 'a correct form short-circuits');
+  assert.equal(again.declaredInput, false);
 });
 
 test('§5b — name-collision safety: default name taken by an unrelated row → numeric suffix', () => {

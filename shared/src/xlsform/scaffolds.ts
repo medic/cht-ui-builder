@@ -68,6 +68,7 @@ const CONTACT_SURVEY_HEADERS = ['type', 'name', 'label::en', 'required', 'appear
  *     begin group contact
  *       string    _id      appearance="select-contact type-person"
  *       hidden    patient_id
+ *       hidden    name
  *     end group   contact
  *   end group     inputs
  *   calculate     patient_uuid          calculation=../inputs/contact/_id
@@ -95,18 +96,43 @@ export function buildAppFormScaffold(opts: { basename: string; title?: string })
     r(7, 'begin group', 'contact', ''),
     r(8, 'string', '_id', 'Patient ID', { appearance: 'select-contact type-person' }),
     r(9, 'hidden', 'patient_id', 'Medic ID'),
-    r(10, 'end group', 'contact', ''),
-    r(11, 'end group', 'inputs', ''),
-    r(12, 'calculate', 'patient_uuid', 'Patient UUID', {
+    // `name` completes the CHT docs' "typical inputs group" of
+    // `_id` / `patient_id` / `name`, and restores the matched-pair
+    // invariant: the scaffold declares exactly what its calculates read.
+    //
+    // It was missing, and that was a deploy blocker rather than an
+    // omission. `insertContactFieldRef` writes only the REFERENCE half
+    // (`../inputs/contact/name`), so picking the patient's name produced a
+    // dangling XPath, and `validate-app-forms` fails the ENTIRE run — one
+    // bad reference in one form blocks every form and the app settings:
+    //
+    //   ERROR  …_form_for_elder_population.xml contains invalid XPath:
+    //          calculate for /data/patient_name contains [../inputs/contact/name]
+    //
+    // Measured across the four real configs' app forms: `contact/name` is
+    // declared in 60 forms and referenced in 68 — the third most common
+    // input path after `patient_id` (68) and `_id` (61). And of every
+    // `../inputs/*` reference in those forms, ZERO are undeclared. Real
+    // configs always pair the two; the tool was the only thing that didn't.
+    //
+    // Deliberately just this one row, not the wider cht-core set (PO
+    // decision, 2026-08-14): `short_name`, `date_of_birth` and `sex` are
+    // real but far less used, and putting them in every new form that will
+    // never reference them is clutter. Anything outside this set is
+    // declared on demand — see `insertContactFieldRef`.
+    r(10, 'hidden', 'name', 'Patient name'),
+    r(11, 'end group', 'contact', ''),
+    r(12, 'end group', 'inputs', ''),
+    r(13, 'calculate', 'patient_uuid', 'Patient UUID', {
       calculation: '../inputs/contact/_id',
     }),
-    r(13, 'calculate', 'patient_id', 'Patient ID', {
+    r(14, 'calculate', 'patient_id', 'Patient ID', {
       calculation: '../inputs/contact/patient_id',
     }),
-    r(14, 'calculate', 'created_by', 'Created by user', {
+    r(15, 'calculate', 'created_by', 'Created by user', {
       calculation: '../inputs/user/name',
     }),
-    r(15, 'calculate', 'created_by_person_uuid', 'Creator uuid', {
+    r(16, 'calculate', 'created_by_person_uuid', 'Creator uuid', {
       calculation: '../inputs/user/contact_id',
     }),
   ];

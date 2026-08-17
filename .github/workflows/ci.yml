@@ -46,6 +46,54 @@ jobs:
       # (shared/src/fhir/** has zero new errors/warnings). Re-add this step
       # once the eslint config is fixed.
 
+  generated-forms-validate:
+    # The pyxform oracle. Nothing else we run can tell whether an XForm's
+    # XPaths actually resolve, and that blind spot let a deploy blocker ship:
+    # `insertContactFieldRef` emitted `../inputs/contact/name` without
+    # declaring the node, and cht-conf's `validate-app-forms` fails the ENTIRE
+    # run on one bad XPath — so one form blocked every form and the app
+    # settings. Nine green flow tests and a clean typecheck all missed it.
+    #
+    # Its own job rather than a step in build-test-lint, because it needs
+    # python + pyxform and takes noticeably longer than the unit suite.
+    # A fast hermetic version of the same invariant runs in the shared tests
+    # (insertContactFieldRef.declare.test.ts), so a break shows up there too.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # cht-conf shells out to pyxform for convert-app-forms. Verified
+      # locally against pyxform 4.5.0 / cht-conf 6.5.0.
+      - name: Install pyxform
+        run: python -m pip install --upgrade pyxform
+
+      - run: pnpm install --frozen-lockfile
+
+      # The script drives the REAL generator out of shared/dist rather than
+      # reimplementing it, so shared has to be built first.
+      - name: Build shared
+        run: pnpm --filter @cht-ui/shared build
+
+      # Asserts both directions: a form this tool generates passes, AND a
+      # deliberately-broken one is rejected. Without the second check a
+      # validator that stopped looking would still show green.
+      - name: Validate tool-generated forms with cht-conf + pyxform
+        run: node scripts/validate-generated-forms.mjs
+
   e2e:
     # Browser-driven Playwright suite against the committed mini-config fixture.
     # playwright.config.ts boots a non-watch API server (server `start`) + Vite

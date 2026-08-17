@@ -261,11 +261,16 @@ test('planUngroup — refuses when the target row is not a begin row', () => {
 test('§B1 — defaultInsertIndex on the Default app scaffold lands BEFORE the trailing linking calculates', () => {
   const scaffold = buildAppFormScaffold({ basename: 'pregnancy_visit' });
   const idx = defaultInsertIndex(scaffold.survey);
-  // The scaffold's trailing calculates start at row 12 (per §B1 layout
-  // in scaffolds.ts: rows 0-11 = inputs block, rows 12-15 = linking
-  // calculates). The first inserted question must land at idx 12 so it
-  // appears above the (invisible-in-Simple-mode) plumbing.
-  assert.equal(idx, 12, 'index must point at the first trailing calculate');
+  // The scaffold's trailing calculates start at row 13 (per §B1 layout in
+  // scaffolds.ts: rows 0-12 = inputs block, rows 13-16 = linking
+  // calculates). The first inserted question must land there so it appears
+  // above the (invisible-in-Simple-mode) plumbing.
+  //
+  // Was 12 until `hidden name` joined inputs/contact. Asserting the
+  // relationship rather than the literal would not be better here: the
+  // point of the test is that the boundary is computed, and a wrong
+  // boundary is exactly what a literal catches.
+  assert.equal(idx, 13, 'index must point at the first trailing calculate');
   const insertedAt = scaffold.survey[idx]!;
   assert.equal(insertedAt.type, 'calculate', 'idx points at a calculate row');
   assert.equal(insertedAt.name, 'patient_uuid', 'and specifically the first linking calc');
