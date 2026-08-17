@@ -184,6 +184,12 @@ interface ContextScan {
 tell a *conditional* key that will exist for this patient from one that won't. Running the deployed
 contact-summary against a **real contact** answers both.
 
+**And it is not merely incomplete — it is ambiguous.** QA's sharpest point: `previous_bmi_ctx` is
+gated on **age >= 30 and an existing NCD record**, so a key can be legitimately empty for a given
+patient. Static detection cannot tell *"this key doesn't apply to her"* from *"you spelled it
+wrong."* Showing **"BMI -> 27.6"** versus **"not set for this contact"** is the difference between
+picking a value and guessing an identifier.
+
 Design: when connected to an instance, execute the compiled contact-summary for a chosen contact
 and show the **actual value** beside each key —
 
@@ -205,12 +211,22 @@ the dynamic families tier 1 can't name, and it validates the key end-to-end befo
 
 **Implementation notes:**
 - QA's note, worth heeding: the compiled contact-summary is a **UMD bundle** and needs
-  **global-scope sandboxing** to execute.
+  **global-scope sandboxing** -- **`new Function` silently returns `{}`**.
+- **Therefore an execution failure must be its OWN state, never an empty list.** A silent `{}`
+  renders as "this config computes nothing" -- visually identical to today's bug, and it would look
+  like the feature working. Say *"couldn't evaluate this config's contact summary"* and fall back to
+  the tier-1 list.
 - Run it **server-side** (never in the client) against the instance's real contact + reports.
 - This must be **read-only and side-effect-free** — it evaluates config against live data. Treat any
   write as a bug.
 - Degrade honestly: no instance → tier-1 list with *"connect to an instance to see real values."*
 - Pick-a-contact needs a chooser; reuse whatever the deploy panel already uses to reach the instance.
+
+### Follow the config's own read idiom when inserting
+NSSD's forms read context as **`once(instance('contact-summary')/context/previous_bmi_ctx)`** -- the
+`once()` wrapper is this config's convention. `calcReference` already supports `read-once` as a
+wrapper option, so the insert should **detect what the config's existing forms do and match it**
+rather than defaulting to ours. Same principle as tier 3.
 
 ## Tier 3 — emit in the project's house style
 
