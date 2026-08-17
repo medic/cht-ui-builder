@@ -33,6 +33,7 @@ import {
   emitContactSummary,
   emitFieldRef,
   type CalculationRule,
+  type ContextKeyInfo,
   type ContextWrapper,
   type ReportFieldChoice,
   type ParsedCalculation,
@@ -40,7 +41,79 @@ import {
 } from '@cht-ui/shared';
 import { useApp } from '../state/store.js';
 import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
-import { useContactSummaryBridgeKeys, type ContextBridgeKey } from './useContactSummaryContextKeys.js';
+import {
+  useContactSummaryBridgeKeys,
+  useContextKeyScan,
+  type ContextBridgeKey,
+  type ContextKeyScan,
+} from './useContactSummaryContextKeys.js';
+
+/**
+ * Say plainly when the offered list is not the whole story.
+ *
+ * docs/plans/pick-preexisting-context-values.md is explicit about this:
+ * "Never present a partial list as complete." A config can build context
+ * keys in ways static analysis provably cannot enumerate — a
+ * `context[key] = value` loop, a template-literal family like
+ * `baby_name_${i}_ctx`, or a spread from another function. NSSD does all
+ * three. If we stay quiet, a key that exists at runtime but isn't listed
+ * reads to the author as their own spelling mistake.
+ *
+ * Renders nothing when there is nothing to disclose, so the common case
+ * stays uncluttered.
+ */
+function ContextKeyHonestyNote(props: { scan: ContextKeyScan | null }): JSX.Element | null {
+  const scan = props.scan;
+  if (!scan) return null;
+
+  // Distinct from "found none": we could not locate the context object at
+  // all. Reporting an empty list here is exactly the bug this feature fixes.
+  if (!scan.definitionsFound && scan.keys.length === 0) {
+    return (
+      <p className="muted small wrapper-help">
+        Couldn’t find this config’s contact-summary <code>context</code>
+        {scan.summaryFiles.length > 0 ? ` in ${scan.summaryFiles.join(', ')}` : ''}. You can still
+        type a key — it just won’t be checked.
+      </p>
+    );
+  }
+
+  if (scan.indeterminate.length === 0) return null;
+
+  const families = scan.indeterminate.some((n) => n.reason === 'template-literal-key');
+  return (
+    <p className="muted small wrapper-help">
+      This config also builds some values dynamically
+      {families ? ' (whole families of them, named from the data)' : ''}, which can’t be listed
+      here. The list above is what we can see, not everything that exists — type a key directly if
+      you know it.
+    </p>
+  );
+}
+
+/**
+ * The secondary text shown beside a context key in the picker.
+ *
+ * Two things worth saying, both from the scan:
+ *  - **Proof of use.** A key six forms already read is safer to offer than
+ *    one nothing reads, and 49 of NSSD's 70 keys are only visible BECAUSE a
+ *    form reads them.
+ *  - **Conditional.** Some keys are only set for some contacts (NSSD gates
+ *    `previous_bmi_ctx` on age >= 30 plus an existing NCD record), and static
+ *    analysis cannot tell "doesn't apply to her" from "you spelled it wrong".
+ *    Saying so is the honest version.
+ */
+function contextKeyHint(k: ContextKeyInfo): string {
+  const parts: string[] = [];
+  if (k.usageCount > 0) {
+    const n = k.usedBy?.length ?? 0;
+    parts.push(n === 1 ? 'used by 1 form' : `used by ${n} forms`);
+  } else if (k.origins?.length) {
+    parts.push('defined, not yet used in a form');
+  }
+  if (k.conditional) parts.push('only set for some contacts');
+  return parts.join(' · ');
+}
 
 interface Props {
   value: string;
@@ -478,6 +551,10 @@ function SingleValuePanel(props: {
 }) {
   const bridgeKeys = useContactSummaryBridgeKeys();
   const bridgeKeySet = useMemo(() => new Set(bridgeKeys.map((b) => b.key)), [bridgeKeys]);
+  // The three-channel scan: what this config already computes, ranked by how
+  // many forms already read each key, plus the wrapper idiom the project
+  // itself uses and an honest note about what static analysis cannot see.
+  const ctxScan = useContextKeyScan();
   const detectedRef = recognizeReference(props.value);
   // Wave 3 · Note 6 — a `contact-summary` reference whose key is a known
   // bridge AND whose wrapper is `fallback-to-current` is a cross-form
@@ -501,6 +578,14 @@ function SingleValuePanel(props: {
   useEffect(() => {
     if (detectedRef?.kind === 'contact-summary') setContextWrapper(detectedRef.wrapper);
   }, [detectedRef]);
+  // When there is nothing to re-hydrate, start from the idiom this project
+  // already uses rather than a constant of ours. Measured, there is no right
+  // constant: nssd writes if(REF, REF, .), gandaki and moh-nepal write
+  // if(REF != '', REF, .), lumbini writes coalesce(REF, .).
+  const houseWrapper = ctxScan?.houseWrapper ?? null;
+  useEffect(() => {
+    if (!detectedRef && houseWrapper) setContextWrapper(houseWrapper);
+  }, [detectedRef, houseWrapper]);
 
   // Union of project-discovered contact fields + the known-minimal
   // fallback; free-type is always honored via the datalist.
@@ -644,9 +729,15 @@ function SingleValuePanel(props: {
                 aria-label="Contact-summary context key"
               />
               <datalist id="cb-context-keys">
-                {props.contextKeys.map((k) => (
-                  <option key={k} value={k} />
-                ))}
+                {/* The scan's order IS the confidence signal — keys real
+                    forms already read come first, most-read first — so it is
+                    preserved rather than sorted. The label shows the proof of
+                    use and flags keys that only exist for some contacts. */}
+                {(ctxScan?.keys ?? props.contextKeys.map((k) => ({ key: k }) as ContextKeyInfo)).map(
+                  (k) => (
+                    <option key={k.key} value={k.key} label={contextKeyHint(k)} />
+                  ),
+                )}
               </datalist>
             </label>
             <label className="row gap" style={{ alignItems: 'center' }}>
@@ -659,18 +750,16 @@ function SingleValuePanel(props: {
                 aria-label="Contact-summary wrapper"
                 aria-describedby="cs-wrapper-help"
               >
-                <option value="none" title={CONTEXT_WRAPPER_HELP.none}>
-                  {CONTEXT_WRAPPER_LABELS.none}
-                </option>
-                <option
-                  value="fallback-to-current"
-                  title={CONTEXT_WRAPPER_HELP['fallback-to-current']}
-                >
-                  {CONTEXT_WRAPPER_LABELS['fallback-to-current']}
-                </option>
-                <option value="read-once" title={CONTEXT_WRAPPER_HELP['read-once']}>
-                  {CONTEXT_WRAPPER_LABELS['read-once']}
-                </option>
+                {/* Iterated, not hand-listed: the previous three literal
+                    options are why `guarded-fallback` and `coalesce` were
+                    unreachable from the UI after the recognizer learned
+                    them. */}
+                {(Object.keys(CONTEXT_WRAPPER_LABELS) as ContextWrapper[]).map((w) => (
+                  <option key={w} value={w} title={CONTEXT_WRAPPER_HELP[w]}>
+                    {CONTEXT_WRAPPER_LABELS[w]}
+                    {w === houseWrapper ? ' — this config’s usual style' : ''}
+                  </option>
+                ))}
               </select>
             </label>
             <code className="muted">
@@ -683,6 +772,7 @@ function SingleValuePanel(props: {
           <p id="cs-wrapper-help" className="muted small wrapper-help">
             {CONTEXT_WRAPPER_HELP[contextWrapper]}
           </p>
+          <ContextKeyHonestyNote scan={ctxScan} />
         </div>
       )}
 

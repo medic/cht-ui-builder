@@ -1,23 +1,41 @@
 /**
- * Load the project's `contact-summary.templated.js` once per session and
- * expose its `context` keys (the symbols accessible via
- * `instance('contact-summary')/context/<key>` from any app form's XForm
- * expressions).
+ * The context keys available to any app form's XForm expressions via
+ * `instance('contact-summary')/context/<key>`, loaded once per session.
  *
  * Mirrors `useContactFormFields`: module-level cache + inflight promise +
  * subscriber set, so multiple FormEditor mounts share one fetch.
  *
- * Returns `[]` when:
- *   - the project has no contact-summary file (the calc reference picker
- *     then shows a free-type-only contact-summary mode);
- *   - the file exists but the parser can't find a `context` object;
- *   - the fetch fails (treat as missing — non-fatal).
+ * ## Why this stopped parsing one file itself
+ *
+ * It used to fetch `contact-summary.templated.js` and run
+ * `parseContactSummary` on it. On config-nssd/chis that produced ZERO keys
+ * where there are about seventy, because line 18 of that file is
+ * `const context = getContext(thisContact, allReports)` — the keys live in
+ * the extras file, and the detector only recognised a literal. Four separate
+ * causes could produce the same silent empty list, and the blanket `catch`
+ * made all four indistinguishable from "this config computes nothing".
+ *
+ * Now the server does a three-channel scan (form calculations, form
+ * eligibility, static definition scan) and returns per-key detail plus an
+ * explicit statement of what it could NOT see. Measured through the route:
+ * nssd 70, lumbini 39, cht-default 14, gandaki 9.
+ *
+ * The templated-file parse is still done here, but only for its original
+ * second job — recognising the cross-form bridge IIFE that our own Context
+ * values tab emits, which needs the literal's right-hand side.
  *
  * Used by `SingleValuePanel`'s "Contact-summary value" reference kind
- * (plan docs/plans/calc-reference-builder.md Tier 1.5).
+ * (plan docs/plans/calc-reference-builder.md Tier 1.5) and by
+ * docs/plans/pick-preexisting-context-values.md.
  */
 import { useEffect, useState } from 'react';
-import { parseContactSummary, recognizeContextValueBridge } from '@cht-ui/shared';
+import {
+  parseContactSummary,
+  recognizeContextValueBridge,
+  type ContextKeyInfo,
+  type ContextWrapper,
+  type IndeterminateNote,
+} from '@cht-ui/shared';
 import { api } from '../api.js';
 import { useApp } from '../state/store.js';
 
@@ -34,9 +52,33 @@ export interface ContextBridgeKey {
   sourceField: string;
 }
 
+/**
+ * Everything the pickers need to offer pre-existing context values.
+ *
+ * `keys` stays a plain `string[]` so existing consumers are untouched; the
+ * richer per-key detail rides alongside in `scan`.
+ */
 interface Snapshot {
   keys: string[];
   bridges: ContextBridgeKey[];
+  /**
+   * The full three-channel scan (form calculations + form eligibility +
+   * static definition scan), ranked most-used first. `null` when the
+   * server route is unavailable — distinct from "scanned and found none",
+   * which is the distinction today's zero-keys bug fails to make.
+   */
+  scan: ContextKeyScan | null;
+}
+
+export interface ContextKeyScan {
+  keys: ContextKeyInfo[];
+  indeterminate: IndeterminateNote[];
+  /** False ⇒ we could not find the context object at all, not "it's empty". */
+  definitionsFound: boolean;
+  /** Contact-summary files the scan actually read, whatever they're called. */
+  summaryFiles: string[];
+  /** The wrapper idiom this project already uses; null when no evidence. */
+  houseWrapper: ContextWrapper | null;
 }
 
 let cache: Snapshot | null = null;
@@ -45,10 +87,41 @@ let cacheKey: string | null = null;
 const subscribers = new Set<(v: Snapshot) => void>();
 
 async function loadSnapshot(): Promise<Snapshot> {
+  // Two independent requests. The bridges list needs the templated file's
+  // own `context` literal (it recognises the reports-scan IIFE our own
+  // Context-values tab emits), while the key list needs the three-channel
+  // scan. Neither failing may take the other down, and neither may take the
+  // picker down — it degrades to free-type, never errors.
+  const [scan, bridges] = await Promise.all([loadScan(), loadBridges()]);
+  // Prefer the scan's ranked union; fall back to whatever the templated-file
+  // parse found, so an older/absent route still yields the old behaviour.
+  const keys = scan ? scan.keys.map((k) => k.key) : bridges.fallbackKeys;
+  return { keys, bridges: bridges.bridges, scan };
+}
+
+async function loadScan(): Promise<ContextKeyScan | null> {
+  try {
+    const res = await api.getContactSummaryContextKeys();
+    return {
+      keys: res.keys,
+      indeterminate: res.indeterminate,
+      definitionsFound: res.definitionsFound,
+      summaryFiles: res.summaryFiles ?? [],
+      houseWrapper: res.houseWrapper ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadBridges(): Promise<{
+  bridges: ContextBridgeKey[];
+  fallbackKeys: string[];
+}> {
   try {
     const files = await api.getContactSummaryFiles();
     const src = files['contact-summary.templated.js'];
-    if (!src) return { keys: [], bridges: [] };
+    if (!src) return { bridges: [], fallbackKeys: [] };
     const parsed = parseContactSummary(src);
     const bridges: ContextBridgeKey[] = [];
     for (const key of parsed.contextOrder) {
@@ -56,11 +129,9 @@ async function loadSnapshot(): Promise<Snapshot> {
       const b = recognizeContextValueBridge(expr);
       if (b) bridges.push({ key, sourceForm: b.sourceForm, sourceField: b.sourceField });
     }
-    return { keys: parsed.contextOrder, bridges };
+    return { bridges, fallbackKeys: parsed.contextOrder };
   } catch {
-    // No contact-summary route, or the file is unreadable — the picker
-    // degrades to free-type, never errors.
-    return { keys: [], bridges: [] };
+    return { bridges: [], fallbackKeys: [] };
   }
 }
 
@@ -69,7 +140,7 @@ function subscribeToSnapshot(
   notify: (v: Snapshot) => void,
 ): () => void {
   if (!projectPath) {
-    notify({ keys: [], bridges: [] });
+    notify({ keys: [], bridges: [], scan: null });
     return () => {};
   }
   // ALWAYS register the subscriber — even on a warm cache — so a later
@@ -118,6 +189,18 @@ export function invalidateContactSummaryContextKeys(): void {
     inflight = null;
     return out;
   });
+}
+
+/**
+ * The full three-channel scan, for surfaces that want usage counts, the
+ * conditional marker, or the honesty banner. `null` until loaded / when the
+ * route is unavailable.
+ */
+export function useContextKeyScan(): ContextKeyScan | null {
+  const projectPath = useApp((s) => s.project?.path ?? '');
+  const [scan, setScan] = useState<ContextKeyScan | null>(cache?.scan ?? null);
+  useEffect(() => subscribeToSnapshot(projectPath, (snap) => setScan(snap.scan)), [projectPath]);
+  return scan;
 }
 
 export function useContactSummaryContextKeys(): string[] {

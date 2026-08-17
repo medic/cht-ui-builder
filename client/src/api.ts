@@ -2,7 +2,7 @@
  * Thin client for the Fastify server. All routes are proxied through
  * /api/* by Vite in dev; same-origin in production.
  */
-import type { XLSForm } from '@cht-ui/shared';
+import type { ContextScan, ContextWrapper, XLSForm } from '@cht-ui/shared';
 import type { FormListEntry, ProjectInfo } from './state/store.js';
 
 export interface DeployConfig {
@@ -363,6 +363,17 @@ export const api = {
     jsonFetch<
       Record<'contact-summary.templated.js' | 'contact-summary.extras.js', string | null>
     >('/api/contact-summary/files'),
+
+  /**
+   * Which context values does this config already compute? Union of three
+   * channels — form calculations, form eligibility, and a static scan of the
+   * contact-summary — plus the wrapper idiom the project already uses.
+   * See shared/src/contactSummary/contextKeyDiscovery.ts.
+   */
+  getContactSummaryContextKeys: () =>
+    jsonFetch<
+      ContextScan & { summaryFiles: string[]; houseWrapper: ContextWrapper | null }
+    >('/api/contact-summary/context-keys'),
 
   saveContactSummaryFile: (
     file: 'contact-summary.templated.js' | 'contact-summary.extras.js',
