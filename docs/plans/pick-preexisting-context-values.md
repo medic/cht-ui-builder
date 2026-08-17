@@ -83,11 +83,12 @@ ERROR  One or more forms have failed validation.
 ```
 
 **The fix, four parts:**
-1. **Scaffold the standard set** — declare the cht-core contact fields in `inputs/contact` up front
-   (`pregnancy.xlsx` ships `_id`, `name`, `short_name`, `patient_id`, `date_of_birth`, `sex`), which
-   restores the matched-pair invariant for the common cases with no runtime logic at all.
-   **My one refinement:** declare the **nodes**, but keep the harvest **calculates** on demand —
-   otherwise every new form carries six calculates the author never asked for.
+1. **Scaffold `name` only** *(PO decision, 2026-08-14)*. Add **one** row — `hidden name` under
+   `inputs/contact` — not the wider cht-core set. `name` is the one field the CHT docs state is
+   always present: their documented "typical inputs group" lists exactly
+   `_id`, `patient_id`, **`name`**, so adding it restores the matched-pair invariant for the field
+   people actually reach for, without putting `short_name`/`date_of_birth`/`sex` rows into every new
+   form that will never use them. Declare the **node**; keep the harvest **calculate** on demand.
 2. **Declare on demand** in `insertContactFieldRef` for anything outside that set, in the same
    undoable patch — necessary because config-specific fields can't be enumerated ahead of time
    (NSSD's `c82_person` carries `sickle_cell_test`, `house_number`, …).
@@ -145,7 +146,45 @@ because it only scans inside the last `return`, where the real export is `contex
 
 ---
 
-## Tier 1 — see what's statically there *(do first; small, read-only)*
+## How we pre-know which context values are available — three channels, measured
+
+**The central finding, and it inverts the earlier draft of this spec: reading what the config
+already *consumes* beats reading what it *defines*.** Measured on `config-nssd/chis`:
+
+| Channel | What it scans | Keys found | Note |
+|---|---|---|---|
+| **① Consumption — form calculations** | `instance('contact-summary')/context/<key>` across all `forms/app/*.xml` | **63** | Each one **proven to work** — a deployed form already reads it |
+| **② Consumption — form eligibility** | `summary.<key>` across all `*.properties.json` | **7** | Includes `is_active_pregnancy`, which **neither other channel finds** |
+| **③ Definition — static scan** | `context.<key> = …` in the contact-summary | **21** | The weakest channel: **21 of ~70** |
+| **Union** | | **~70** | |
+
+**48 keys are consumed by real forms but invisible to the static scan** — the whole vaccination
+series (`*_vax`, from the `getChildVaccinations` spread), the ANC/pregnancy set
+(`lmp_date_8601`, `edd_8601`, `risk_factor_codes`, `tt_received_past`, …, from the dynamic
+`context[key] = value` loop at `:376`), and the `baby_name_1..4_ctx` / `baby_status_1..4_ctx`
+families (template-literal keys). **Channel ① finds the dynamic families concretely, with their real
+instantiated names — exactly what static analysis provably cannot do.**
+
+Conversely 6 keys are *defined but unused in form XML* (`alive`, `has_become_form`, the `show_*_form`
+set) — and channel ② explains why: they're consumed in **form eligibility expressions**, not
+calculations. So the channels are complementary, not redundant; each catches what the others miss.
+
+**Two things channel ① gives away for free:**
+- **A confidence signal.** A key 6 forms already read is safer to offer than one nothing reads. Sort
+  by usage count.
+- **The house idiom.** The surrounding text shows *how* this config reads context —
+  `once(instance(…))` in NSSD's case — so we can match it instead of imposing ours.
+
+**Cost:** near zero. We already parse every form on project open, and `calcReference.ts` already owns
+the regexes for both reference shapes.
+
+### Implementation order (revised)
+1. **Channel ① + ②** — scan forms for consumption. Highest yield, proof-of-use attached, gives the
+   idiom. **Do this first**, not the static scan.
+2. **Channel ③** — the static scan below, to catch defined-but-not-yet-consumed keys.
+3. **Live values (tier 2)** — resolve conditionals and show the actual number.
+
+## Channel ③ — the static definition scan *(supplementary, not primary)*
 
 Extend `shared/src/tasks/contactSummaryParser.ts` to collect context keys from all of:
 1. `const|let|var context = { … }` — **already works**, keep.
