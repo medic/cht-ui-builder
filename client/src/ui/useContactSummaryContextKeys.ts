@@ -77,6 +77,8 @@ export interface ContextKeyScan {
   definitionsFound: boolean;
   /** Contact-summary files the scan actually read, whatever they're called. */
   summaryFiles: string[];
+  /** Forms whose workbook could not be parsed, so their reads are missing. */
+  unreadableForms: string[];
   /** The wrapper idiom this project already uses; null when no evidence. */
   houseWrapper: ContextWrapper | null;
 }
@@ -85,6 +87,20 @@ let cache: Snapshot | null = null;
 let inflight: Promise<Snapshot> | null = null;
 let cacheKey: string | null = null;
 const subscribers = new Set<(v: Snapshot) => void>();
+
+/**
+ * The cached snapshot, but ONLY if it belongs to `projectPath`.
+ *
+ * Switching project is a plain `setProject` with no reload, so this module's
+ * state survives it. Seeding component state from `cache` without checking
+ * whose it is meant a form opened just after a switch could be offered the
+ * PREVIOUS project's context keys — and the wrapper marked "this config's
+ * usual style" was the previous config's too. A key picked in that window
+ * wrote a reference the new project does not define.
+ */
+function snapshotFor(projectPath: string): Snapshot | null {
+  return cacheKey === projectPath ? cache : null;
+}
 
 async function loadSnapshot(): Promise<Snapshot> {
   // Two independent requests. The bridges list needs the templated file's
@@ -107,6 +123,7 @@ async function loadScan(): Promise<ContextKeyScan | null> {
       indeterminate: res.indeterminate,
       definitionsFound: res.definitionsFound,
       summaryFiles: res.summaryFiles ?? [],
+      unreadableForms: res.unreadableForms ?? [],
       houseWrapper: res.houseWrapper ?? null,
     };
   } catch {
@@ -157,7 +174,12 @@ function subscribeToSnapshot(
     notify(cache);
   } else if (!inflight || cacheKey !== projectPath) {
     cacheKey = projectPath;
+    const loadingFor = projectPath;
     inflight = loadSnapshot().then((out) => {
+      // Only commit if this is still the open project. The route parses every
+      // workbook, so a slow scan for the project the user just left could
+      // otherwise land on top of the new one's.
+      if (cacheKey !== loadingFor) return out;
       cache = out;
       for (const fn of subscribers) fn(out);
       inflight = null;
@@ -198,14 +220,20 @@ export function invalidateContactSummaryContextKeys(): void {
  */
 export function useContextKeyScan(): ContextKeyScan | null {
   const projectPath = useApp((s) => s.project?.path ?? '');
-  const [scan, setScan] = useState<ContextKeyScan | null>(cache?.scan ?? null);
+  // snapshotFor, not `cache` — see its doc. Seeding from another project's
+  // cache offered that project's keys until the new scan resolved.
+  const [scan, setScan] = useState<ContextKeyScan | null>(
+    () => snapshotFor(useApp.getState().project?.path ?? '')?.scan ?? null,
+  );
   useEffect(() => subscribeToSnapshot(projectPath, (snap) => setScan(snap.scan)), [projectPath]);
   return scan;
 }
 
 export function useContactSummaryContextKeys(): string[] {
   const projectPath = useApp((s) => s.project?.path ?? '');
-  const [keys, setKeys] = useState<string[]>(cache?.keys ?? []);
+  const [keys, setKeys] = useState<string[]>(
+    () => snapshotFor(useApp.getState().project?.path ?? '')?.keys ?? [],
+  );
   useEffect(() => subscribeToSnapshot(projectPath, (snap) => setKeys(snap.keys)), [projectPath]);
   return keys;
 }
@@ -222,7 +250,9 @@ export function useContactSummaryContextKeys(): string[] {
  */
 export function useContactSummaryBridgeKeys(): ContextBridgeKey[] {
   const projectPath = useApp((s) => s.project?.path ?? '');
-  const [bridges, setBridges] = useState<ContextBridgeKey[]>(cache?.bridges ?? []);
+  const [bridges, setBridges] = useState<ContextBridgeKey[]>(
+    () => snapshotFor(useApp.getState().project?.path ?? '')?.bridges ?? [],
+  );
   useEffect(
     () => subscribeToSnapshot(projectPath, (snap) => setBridges(snap.bridges)),
     [projectPath],

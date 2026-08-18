@@ -48,7 +48,7 @@
  * invariant this rule now enforces: the one the configs already hold and
  * the tool was alone in breaking.
  */
-import { isStructural, type SurveyRow } from '../../xlsform/types.js';
+import { isStructural, structuralKind, type SurveyRow } from '../../xlsform/types.js';
 import type { PreflightCheck, PreflightContext, PreflightResult } from '../types.js';
 
 export const DANGLING_REFS_CHECK: PreflightCheck = {
@@ -114,12 +114,17 @@ function declaredInputPaths(survey: SurveyRow[]): Set<string> {
   const paths = new Set<string>();
   const stack: string[] = [];
   for (const row of survey) {
-    const t = row.type.trim().toLowerCase();
-    if (t === 'begin group' || t === 'begin repeat') {
+    // structuralKind tolerates `begin_group` / `end_group`, which 29 real
+    // forms use. Matching only the space spelling meant the stack never
+    // popped on those forms, so top-level rows after the inputs block were
+    // registered as declared input paths — garbage in both directions:
+    // references that should fail passed, and vice versa.
+    const k = structuralKind(row);
+    if (k?.edge === 'begin') {
       stack.push(row.name);
       continue;
     }
-    if (t === 'end group' || t === 'end repeat') {
+    if (k?.edge === 'end') {
       stack.pop();
       continue;
     }

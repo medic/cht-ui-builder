@@ -80,7 +80,7 @@
  * atomic undo for "user clicked insert contact field" (both the calc row
  * and the label mutation land or roll back together).
  */
-import type { SurveyRow, XLSForm } from './types.js';
+import { structuralKind, type SurveyRow, type XLSForm } from './types.js';
 
 /** Result of {@link insertContactFieldRef}. */
 export interface InsertContactFieldRefResult {
@@ -162,12 +162,16 @@ function findInsertAfterInputsEnd(survey: SurveyRow[]): number {
   const stack: string[] = [];
   for (let i = 0; i < survey.length; i++) {
     const r = survey[i]!;
-    const t = r.type.trim().toLowerCase();
-    if (t === 'begin group' || t === 'begin repeat') {
+    // structuralKind, not a literal type comparison: pyxform also accepts
+    // `begin_group` / `end_group`, and 29 real forms use them. Matching only
+    // the space spelling left the stack un-popped, so this returned -1 on
+    // those forms and the calc was appended at the end of the survey.
+    const k = structuralKind(r);
+    if (k?.edge === 'begin') {
       stack.push(r.name);
       continue;
     }
-    if (t === 'end group' || t === 'end repeat') {
+    if (k?.edge === 'end') {
       const closed = stack.pop();
       // Top-level `inputs` closing → insertion point is right after it.
       if (closed === 'inputs' && stack.length === 0) {
@@ -192,12 +196,12 @@ function findInputsContactEnd(survey: SurveyRow[]): number {
   const stack: string[] = [];
   for (let i = 0; i < survey.length; i++) {
     const r = survey[i]!;
-    const t = r.type.trim().toLowerCase();
-    if (t === 'begin group' || t === 'begin repeat') {
+    const k = structuralKind(r);
+    if (k?.edge === 'begin') {
       stack.push(r.name);
       continue;
     }
-    if (t === 'end group' || t === 'end repeat') {
+    if (k?.edge === 'end') {
       const closed = stack.pop();
       // `contact` closing while `inputs` is the only thing still open.
       if (closed === 'contact' && stack.length === 1 && stack[0] === 'inputs') {
@@ -220,12 +224,12 @@ function findInputsContactEnd(survey: SurveyRow[]): number {
 function isDeclaredInInputsContact(survey: SurveyRow[], field: string): boolean {
   const stack: string[] = [];
   for (const r of survey) {
-    const t = r.type.trim().toLowerCase();
-    if (t === 'begin group' || t === 'begin repeat') {
+    const k = structuralKind(r);
+    if (k?.edge === 'begin') {
       stack.push(r.name);
       continue;
     }
-    if (t === 'end group' || t === 'end repeat') {
+    if (k?.edge === 'end') {
       stack.pop();
       continue;
     }
@@ -256,8 +260,7 @@ function isDeclaredInInputsContact(survey: SurveyRow[], field: string): boolean 
 function nameOccurrences(survey: SurveyRow[], name: string): number {
   let n = 0;
   for (const r of survey) {
-    const t = r.type.trim().toLowerCase();
-    if (t.startsWith('begin ') || t.startsWith('end ')) continue;
+    if (structuralKind(r)) continue;
     if (r.name === name) n++;
   }
   return n;
@@ -326,8 +329,7 @@ export function insertContactFieldRef(
       // We cannot resolve it ourselves: the XPath names the declaration, and
       // renaming the other row would change the report document's field name.
       const clashing = form.survey.find((r) => {
-        const t = r.type.trim().toLowerCase();
-        if (t.startsWith('begin ') || t.startsWith('end ')) return false;
+        if (structuralKind(r)) return false;
         return r.name === field && !isDeclaredInInputsContact([r], field);
       });
       const referenced =

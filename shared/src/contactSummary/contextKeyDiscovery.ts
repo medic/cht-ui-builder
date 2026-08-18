@@ -54,7 +54,7 @@ import {
 } from '../xlsform/calcReference.js';
 import { isStructural, type XLSForm } from '../xlsform/types.js';
 import { parseContactSummary } from '../tasks/contactSummaryParser.js';
-import { matchBracket, skipNonCodeAt } from '../tasks/jsScan.js';
+import { blankNonCode, matchBracket, skipNonCodeAt } from '../tasks/jsScan.js';
 
 /* ========================== the shared shape ============================= */
 
@@ -156,18 +156,23 @@ export function harvestContextKeyReads(
   const wholeWrapper =
     whole && whole.kind === 'contact-summary' ? whole.wrapper : null;
 
+  // ONE entry per distinct key, not per occurrence. The fallback and guarded
+  // wrappers name the same key twice by construction — `if(REF, REF, .)` — so
+  // counting occurrences double-counts them and inverts the ranking that
+  // ContextKeyInfo.usageCount is documented to express ("how many form cells
+  // read this key") and that the picker orders by. Measured on NSSD: 79 cells
+  // carry context reads but produced 147 hits, ranking `lmp_date_8601` (3
+  // cells) above `previous_bmi_ctx` (5 cells).
   const re = /instance\('contact-summary'\)\/context\/([\w-]+)/g;
+  const seen = new Set<string>();
   let m: RegExpExecArray | null;
-  let count = 0;
   while ((m = re.exec(cell)) !== null) {
-    out.push({ key: m[1]!, wrapper: null });
-    count++;
-  }
-  // A whole-cell wrapper describes the cell, so it applies to the key that
-  // cell is about. The fallback/guarded shapes name the same key twice; both
-  // occurrences legitimately carry the wrapper.
-  if (wholeWrapper && count > 0) {
-    for (const o of out) o.wrapper = wholeWrapper;
+    const key = m[1]!;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // A whole-cell wrapper describes the cell, so it applies to the key that
+    // cell is about.
+    out.push({ key, wrapper: wholeWrapper });
   }
   return out;
 }
@@ -298,8 +303,12 @@ function evidence(s: string): string {
 function findContextBinding(
   src: string,
 ): { initializer: string; start: number } | null {
+  // Search the BLANKED copy so a commented-out `const context = oldCtx(c)`
+  // cannot win over the live binding. It did: the whole scan got pointed at a
+  // dead helper and its keys were offered as the config's, with
+  // `indeterminate: []` claiming the list was complete.
   const re = /\b(?:const|let|var)\s+context\s*=\s*/g;
-  const m = re.exec(src);
+  const m = re.exec(blankNonCode(src));
   if (!m) return null;
   const start = m.index + m[0].length;
   // Walk to the statement terminator at depth 0 so an initializer spanning
@@ -330,19 +339,49 @@ function calleeOf(initializer: string): string | null {
   return m ? m[1]! : null;
 }
 
-/** Body bounds of `function <name>(…) { … }`, or null. */
+/**
+ * Body bounds of a function called `name`, whichever way it is written.
+ *
+ * All four shapes below are ordinary JS, so matching only `function NAME(`
+ * made the one-hop indirection fail on an arrow-assigned helper — returning
+ * zero keys AND a note claiming the definition was "not found in the
+ * contact-summary files" when it was right there:
+ *
+ *   function getContext(a, b) { … }
+ *   const getContext = (a, b) => { … }
+ *   const getContext = function (a, b) { … }
+ *   module.exports = { getContext(a, b) { … } }     // method shorthand
+ *
+ * Searched over the BLANKED source so a commented-out definition cannot win.
+ */
 function findFunctionBody(
   src: string,
   name: string,
 ): { start: number; end: number } | null {
-  const re = new RegExp(`\\bfunction\\s+${name}\\s*\\(`, 'g');
-  const m = re.exec(src);
-  if (!m) return null;
-  const brace = src.indexOf('{', m.index + m[0].length);
-  if (brace < 0) return null;
-  const end = matchBracket(src, brace, '{', '}');
-  if (end < 0) return null;
-  return { start: brace, end };
+  const code = blankNonCode(src);
+  const patterns = [
+    new RegExp(`\\bfunction\\s+${name}\\s*\\(`),
+    new RegExp(`\\b${name}\\s*=\\s*(?:async\\s*)?(?:function\\s*)?\\(`),
+    new RegExp(`(?:^|[,{]\\s*)${name}\\s*\\(`, 'm'),
+  ];
+  for (const re of patterns) {
+    const m = re.exec(code);
+    if (!m) continue;
+    const parenOpen = code.indexOf('(', m.index);
+    if (parenOpen < 0) continue;
+    const parenClose = matchBracket(code, parenOpen, '(', ')');
+    if (parenClose < 0) continue;
+    const brace = code.indexOf('{', parenClose);
+    if (brace < 0) continue;
+    // Only `=>` (or nothing) may sit between the parameter list and the body.
+    // Anything else means this was a CALL, not a definition.
+    const between = code.slice(parenClose + 1, brace).trim();
+    if (between !== '' && between !== '=>') continue;
+    const end = matchBracket(src, brace, '{', '}');
+    if (end < 0) continue;
+    return { start: brace, end };
+  }
+  return null;
 }
 
 /**
@@ -350,12 +389,49 @@ function findFunctionBody(
  * `Object.assign({}, f(…))` and `{...f(…)}` both do.
  */
 function spreadFromCall(initializer: string): boolean {
-  if (/Object\.assign\s*\(/.test(initializer)) {
-    // `Object.assign({}, {literal})` is fully readable; only a CALL hides
-    // keys. Look for an identifier followed by `(` past the first argument.
-    return /Object\.assign\s*\([^)]*[A-Za-z_$][\w$]*\s*\(/.test(initializer);
+  const m = /Object\.assign\s*\(/.exec(initializer);
+  if (m) {
+    const open = initializer.indexOf('(', m.index);
+    const close = matchBracket(initializer, open, '(', ')');
+    const args = splitTopLevel(initializer.slice(open + 1, close < 0 ? undefined : close));
+    // Only an ARGUMENT that is a call hides keys. An object literal is fully
+    // readable even when one of its VALUES is a call — the previous test
+    // matched any `identifier(` anywhere in the argument list, so
+    // `Object.assign({}, { alive: isAlive(c) })` was reported as hiding keys
+    // and the UI told the author the list was incomplete when it was not.
+    // Training someone to distrust a correct list is its own defect.
+    return args.some((a) => {
+      const t = a.trim();
+      if (t === '' || t.startsWith('{')) return false;
+      return /[A-Za-z_$][\w$]*\s*\(/.test(t);
+    });
   }
   return /\.\.\.\s*[A-Za-z_$][\w$]*\s*\(/.test(initializer);
+}
+
+/** Split on top-level commas, ignoring those nested in brackets or non-code. */
+function splitTopLevel(src: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+  while (i < src.length) {
+    const sk = skipNonCodeAt(src, i);
+    if (sk !== null && sk > i) {
+      i = sk;
+      continue;
+    }
+    const c = src[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) {
+      parts.push(src.slice(start, i));
+      start = i + 1;
+    }
+    i++;
+  }
+  parts.push(src.slice(start));
+  return parts;
 }
 
 /**
@@ -428,7 +504,15 @@ function scanAssignments(
         const close = matchBracket(src, rest, '[', ']');
         if (close > 0) {
           const inner = src.slice(rest + 1, close).trim();
-          const isAssign = /^\s*=(?!=)/.test(src.slice(close + 1, close + 4));
+          // Scan PAST any amount of whitespace. A 3-character window meant
+          // `context['lmp_date']    = 1` read as a non-assignment: the key was
+          // dropped, and for a template-literal key the indeterminate note
+          // went with it — a whole key family invisible while the scan
+          // reported itself complete. The sibling dot-form path already
+          // tolerated any spacing, which made this an oversight, not a rule.
+          let probe = close + 1;
+          while (probe < bodyEnd && /\s/.test(src[probe] ?? '')) probe++;
+          const isAssign = src[probe] === '=' && src[probe + 1] !== '=';
           if (isAssign) {
             const literal = /^'([^']*)'$/.exec(inner) ?? /^"([^"]*)"$/.exec(inner);
             if (literal) {
@@ -436,7 +520,7 @@ function scanAssignments(
                 key: literal[1]!,
                 origin: 'definition-assignment',
                 conditional: depth > 0,
-                expression: readRhs(src, src.indexOf('=', close) + 1, bodyEnd),
+                expression: readRhs(src, probe + 1, bodyEnd),
                 file,
               });
             } else {
@@ -474,7 +558,20 @@ function readRhs(src: string, from: number, limit: number): string | null {
     else if (c === ')' || c === ']' || c === '}') {
       if (depth === 0) break;
       depth--;
-    } else if ((c === ';' || c === '\n') && depth === 0) break;
+    } else if (c === ';' && depth === 0) break;
+    else if (c === '\n' && depth === 0) {
+      // A newline only ends the expression when what follows STARTS a new
+      // statement. Breaking on every newline left `context.total =\n  a + b;`
+      // with a null expression, so the picker's "computed from…" hint was
+      // blank for any right-hand side wrapped across lines.
+      let j = i + 1;
+      while (j < src.length && /\s/.test(src[j] ?? '')) j++;
+      const rest = src.slice(j, j + 24);
+      const startsStatement =
+        rest === '' ||
+        /^(context[.[]|const |let |var |return\b|if\s*\(|for\s*\(|\})/.test(rest);
+      if (startsStatement) break;
+    }
     i++;
   }
   const raw = src.slice(from, i).trim();
@@ -674,7 +771,12 @@ export function mergeContextScan(input: {
     allConditional.set(hit.key, prev === undefined ? hit.conditional : prev && hit.conditional);
     // Keep the first expression/file we saw; an unconditional definition is
     // the more useful hint, so prefer it when one turns up later.
-    if (e.expression === null || !hit.conditional) e.expression = hit.expression;
+    // Never let a null overwrite a value we already have — the guard used to
+    // reassign whenever the incoming hit was unconditional, which replaced a
+    // good expression string with null, the opposite of the stated intent.
+    if (hit.expression !== null && (e.expression === null || !hit.conditional)) {
+      e.expression = hit.expression;
+    }
     if (e.definedIn === null || !hit.conditional) e.definedIn = hit.file;
   }
   for (const [key, cond] of allConditional) {

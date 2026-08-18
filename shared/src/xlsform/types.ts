@@ -134,10 +134,55 @@ export const STRUCTURAL_TYPES = ['begin group', 'end group', 'begin repeat', 'en
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 export type StructuralType = (typeof STRUCTURAL_TYPES)[number];
 
+/**
+ * Canonicalise a structural type cell, tolerating the UNDERSCORE spelling.
+ *
+ * pyxform accepts `begin_group` / `end_group` / `begin_repeat` / `end_repeat`
+ * as well as the space-separated forms, and real configs use both. Measured
+ * across the four real configs plus the cht-default template, over every
+ * form in `forms/app` and `forms/contact`:
+ *
+ *   993  begin group        61  begin_group
+ *   969  end group          85  end_group
+ *    17  begin repeat        3  begin_repeat
+ *    16  end repeat          4  end_repeat
+ *
+ * 29 real forms carry an underscore spelling, almost all of them NSSD app
+ * forms. Treating those rows as non-structural makes every group-nesting walk
+ * silently wrong on exactly the config this tool is aimed at: the stack never
+ * pops, so paths computed from it are garbage in both directions.
+ *
+ * Returns the space-separated canonical form, or the trimmed lowercase input
+ * unchanged when it is not a structural marker.
+ */
+export function canonicalStructuralType(type: string): string {
+  const t = type.trim().toLowerCase();
+  const m = /^(begin|end)[ _](group|repeat)$/.exec(t);
+  return m ? `${m[1]} ${m[2]}` : t;
+}
+
+/**
+ * The structural role of a row, for code that walks group nesting.
+ * `null` for anything that is not a begin/end marker.
+ *
+ * Prefer this over comparing `row.type` to `'begin group'` — that misses the
+ * underscore spelling, which 29 real forms use. See
+ * {@link canonicalStructuralType}.
+ */
+export function structuralKind(
+  row: SurveyRow,
+): { edge: 'begin' | 'end'; of: 'group' | 'repeat' } | null {
+  const t = canonicalStructuralType(row.type);
+  const m = /^(begin|end) (group|repeat)$/.exec(t);
+  if (!m) return null;
+  return { edge: m[1] as 'begin' | 'end', of: m[2] as 'group' | 'repeat' };
+}
+
 /** True if the row's type is a structural marker (begin/end group/repeat). */
 export function isStructural(row: SurveyRow): boolean {
-  const t = row.type.trim().toLowerCase();
-  return (STRUCTURAL_TYPES as readonly string[]).includes(t);
+  return (STRUCTURAL_TYPES as readonly string[]).includes(
+    canonicalStructuralType(row.type),
+  );
 }
 
 /**
@@ -182,7 +227,7 @@ const SIMPLE_MODE_VISIBLE_TYPES = new Set<string>([
  */
 export function isHiddenInSimpleMode(row: SurveyRow): boolean {
   const t = row.type.trim().toLowerCase();
-  if ((STRUCTURAL_TYPES as readonly string[]).includes(t)) return true;
+  if ((STRUCTURAL_TYPES as readonly string[]).includes(canonicalStructuralType(t))) return true;
   // select_one / select_multiple carry a list name in the type cell
   // (e.g. "select_one sex_options"), so match the visible-type set on the
   // base token — otherwise every select question is wrongly hidden in

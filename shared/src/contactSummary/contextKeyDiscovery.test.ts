@@ -81,11 +81,30 @@ test('ch1: finds a key used INSIDE a larger expression, with no wrapper', () => 
   assert.deepEqual(hits, [{ key: 'baby_name_1_ctx', wrapper: null }]);
 });
 
-test('ch1: a fallback cell names the same key twice — both carry the wrapper', () => {
-  const hits = harvestContextKeyReads(`if(${CTX('sys_ctx')}, ${CTX('sys_ctx')}, .)`);
-  assert.equal(hits.length, 2);
-  assert.equal(new Set(hits.map((h) => h.key)).size, 1);
-  for (const h of hits) assert.equal(h.wrapper, 'fallback-to-current');
+test('ch1: a fallback cell names the same key twice but counts ONCE', () => {
+  // `if(REF, REF, .)` and `if(REF != '', REF, .)` repeat the key by
+  // construction. Counting occurrences double-counted them and inverted the
+  // usage ranking the picker sorts by — on NSSD, 79 real cells produced 147
+  // hits, putting a 3-cell key above a 5-cell one.
+  for (const cell of [
+    `if(${CTX('sys_ctx')}, ${CTX('sys_ctx')}, .)`,
+    `if(${CTX('sys_ctx')} != '', ${CTX('sys_ctx')}, .)`,
+  ]) {
+    const hits = harvestContextKeyReads(cell);
+    assert.equal(hits.length, 1, cell);
+    assert.equal(hits[0]?.key, 'sys_ctx', cell);
+    assert.ok(hits[0]?.wrapper, 'the whole-cell wrapper still comes through');
+  }
+});
+
+test('ch1: two DIFFERENT keys in one cell are both counted', () => {
+  // Deduping is per-key, not per-cell — a cell reading two keys really does
+  // read two keys.
+  const hits = harvestContextKeyReads(`concat(${CTX('a')}, ' ', ${CTX('b')})`);
+  assert.deepEqual(
+    hits.map((h) => h.key).sort(),
+    ['a', 'b'],
+  );
 });
 
 test('ch1: a cell with no context read costs nothing and yields nothing', () => {
@@ -104,8 +123,8 @@ test('ch1: scans every form and counts usage per key', () => {
   ];
   const hits = scanFormsForContextReads(forms);
   const lmp = hits.filter((h) => h.key === 'lmp_date_8601');
-  // Two occurrences in the guarded cell + one in the other form.
-  assert.equal(lmp.length, 3);
+  // One per CELL: the guarded cell counts once despite naming the key twice.
+  assert.equal(lmp.length, 2);
   assert.deepEqual([...new Set(lmp.map((h) => h.formId))], ['anc_visit', 'pnc_visit']);
 });
 
@@ -513,4 +532,212 @@ test('merge: nothing in, honest nothing out', () => {
   assert.deepEqual(scan.keys, []);
   assert.deepEqual(scan.indeterminate, []);
   assert.equal(scan.definitionsFound, false, 'absent is not the same as empty');
+});
+
+
+/* =============== robustness: found by adversarial review ================
+ *
+ * Every case below silently LOST keys and reported the list as complete —
+ * the one failure mode contextKeyDiscovery's own docstring forbids, because a
+ * key that exists at runtime but is missing from the picker reads to the
+ * author as their own spelling mistake. None was caught by the suite above;
+ * all were found by review agents running the built module.
+ */
+
+test('robustness: a regex literal containing a quote does not swallow the file', () => {
+  // `.replace(/'/g, '')` is ordinary contact-summary code. The quote inside
+  // the regex used to open a phantom string that ran to end-of-file, so every
+  // later assignment vanished with indeterminate: [].
+  const src = `
+const context = {};
+context.alive = !contact.date_of_death;
+const clean = (contact.name || '').replace(/'/g, '');
+context.clean_name = clean;
+context.show_pregnancy_form = true;
+context.total_visit = 3;
+module.exports = { fields: [], cards: [], context };
+`;
+  const scan = scanContextDefinitions([{ file: 'cs.js', source: src }]);
+  assert.deepEqual(
+    [...new Set(scan.hits.map((h) => h.key))].sort(),
+    ['alive', 'clean_name', 'show_pregnancy_form', 'total_visit'],
+  );
+});
+
+test('robustness: a division is still treated as code, not a regex', () => {
+  // The other half of the JS `/` ambiguity. Getting this wrong the other way
+  // would eat the rest of the line.
+  const src = `
+function getContext(c, r) {
+  const context = {};
+  context.ratio = c.weight / c.height;
+  context.after = 1;
+  return context;
+}
+const context = getContext(contact, reports);
+`;
+  const scan = scanContextDefinitions([{ file: 'cs.js', source: src }]);
+  assert.deepEqual(scan.hits.map((h) => h.key), ['ratio', 'after']);
+});
+
+test('robustness: any amount of whitespace before `=` is still an assignment', () => {
+  // A 3-character look-ahead meant `context['lmp_date']    = 1` read as a
+  // non-assignment and the key was dropped.
+  const src = `
+function getContext(c, r) {
+  const context = {};
+  context['lmp_date']    = 1;
+  context['edd']   = 2;
+  context['ok'] = 3;
+  return context;
+}
+const context = getContext(contact, reports);
+`;
+  const scan = scanContextDefinitions([{ file: 'cs.js', source: src }]);
+  assert.deepEqual(scan.hits.map((h) => h.key).sort(), ['edd', 'lmp_date', 'ok']);
+});
+
+test('robustness: a widely-spaced template-literal key still raises the note', () => {
+  // Worse than losing a key: losing the DISCLOSURE that a whole key family
+  // exists, so the scan claimed completeness.
+  const src = `
+function getContext(c, r) {
+  const context = {};
+  for (let i = 1; i < 5; i++) context[\`baby_\${i}\`]    = i;
+  return context;
+}
+const context = getContext(contact, reports);
+`;
+  const scan = scanContextDefinitions([{ file: 'cs.js', source: src }]);
+  assert.deepEqual(
+    scan.indeterminate.map((n) => n.reason),
+    ['template-literal-key'],
+  );
+});
+
+test('robustness: a commented-out binding does not win over the live one', () => {
+  // The dead helper's keys were offered as the config's, and the two real keys
+  // were never scanned.
+  const scan = scanContextDefinitions([
+    {
+      file: 'templated.js',
+      source: `
+// legacy: const context = oldContext(contact);
+const context = {};
+context.alive = true;
+context.show_pregnancy_form = true;
+module.exports = { context };
+`,
+    },
+    {
+      file: 'extras.js',
+      source: 'function oldContext(c) { const context = {}; context.legacy_only = 1; return context; }',
+    },
+  ]);
+  const keys = scan.hits.map((h) => h.key).sort();
+  assert.deepEqual(keys, ['alive', 'show_pregnancy_form']);
+  assert.equal(keys.includes('legacy_only'), false, 'the dead helper is not the source');
+});
+
+test('robustness: getContext written as an arrow function still resolves', () => {
+  // Arrow-assigned helpers are a common style. Matching only
+  // `function NAME(` returned zero keys AND claimed the definition was not
+  // found in the contact-summary files, when it was right there.
+  const scan = scanContextDefinitions([
+    { file: 'templated.js', source: 'const context = getContext(contact, reports);\nmodule.exports={context};' },
+    {
+      file: 'extras.js',
+      source:
+        'const getContext = (contact, reports) => { const context = {}; context.alive = true; context.show_pregnancy_form = true; return context; };',
+    },
+  ]);
+  assert.equal(scan.found, true);
+  assert.deepEqual(scan.hits.map((h) => h.key).sort(), ['alive', 'show_pregnancy_form']);
+});
+
+test('robustness: getContext as a method shorthand also resolves', () => {
+  const scan = scanContextDefinitions([
+    { file: 'templated.js', source: 'const context = getContext(contact, reports);' },
+    {
+      file: 'extras.js',
+      source:
+        'module.exports = { getContext(contact, reports) { const context = {}; context.alive = true; return context; } };',
+    },
+  ]);
+  assert.equal(scan.found, true);
+  assert.deepEqual(scan.hits.map((h) => h.key), ['alive']);
+});
+
+test('robustness: Object.assign of a readable literal is NOT reported as hidden', () => {
+  // The spread test matched any `identifier(` in the argument list, so a call
+  // used as an object VALUE looked like a call ARGUMENT. Telling an author the
+  // list is incomplete when it is complete trains them to distrust a correct
+  // list — its own defect.
+  const scan = scanContextDefinitions([
+    {
+      file: 'cs.js',
+      source: 'const context = Object.assign({}, { alive: isAlive(thisContact) });\nmodule.exports={context};',
+    },
+  ]);
+  assert.deepEqual(scan.indeterminate, []);
+});
+
+test('robustness: Object.assign of a CALL is still reported as hidden', () => {
+  // NSSD's real shape — the note must keep firing for it.
+  const scan = scanContextDefinitions([
+    {
+      file: 'cs.js',
+      source:
+        'const context = Object.assign({}, getAge(c) <= 5 ? getChildVaccinations(c, r) : {});\nmodule.exports={context};',
+    },
+  ]);
+  assert.deepEqual(
+    scan.indeterminate.map((n) => n.reason),
+    ['spread-from-call'],
+  );
+});
+
+test('robustness: a right-hand side wrapped across lines still yields its text', () => {
+  // Breaking on every newline left `expression: null`, so the picker's
+  // "computed from…" hint was blank for any wrapped RHS.
+  const src = `
+function getContext(c, r) {
+  const context = {};
+  context.total =
+    a + b;
+  context.next = 1;
+  return context;
+}
+const context = getContext(contact, reports);
+`;
+  const scan = scanContextDefinitions([{ file: 'cs.js', source: src }]);
+  assert.equal(scan.hits.find((h) => h.key === 'total')?.expression, 'a + b');
+  assert.equal(scan.hits.find((h) => h.key === 'next')?.expression, '1');
+});
+
+test('robustness: merge never lets a null expression overwrite a real one', () => {
+  const scan = mergeContextScan({
+    definitions: {
+      hits: [
+        {
+          key: 'k',
+          origin: 'definition-assignment',
+          conditional: true,
+          expression: 'good()',
+          file: 'a.js',
+        },
+        {
+          key: 'k',
+          origin: 'definition-assignment',
+          conditional: false,
+          expression: null,
+          file: 'a.js',
+        },
+      ],
+      indeterminate: [],
+      found: true,
+    },
+  });
+  assert.equal(scan.keys[0]?.expression, 'good()');
+  assert.equal(scan.keys[0]?.conditional, false, 'and the unconditional hit still wins on that');
 });

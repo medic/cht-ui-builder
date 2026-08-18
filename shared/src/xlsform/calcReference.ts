@@ -148,6 +148,13 @@ const CONTACT_SUMMARY_FALLBACK_RE =
  * interchangeable, so the sentinel is captured and re-emitted verbatim
  * rather than canonicalised.
  *
+ * The sentinel is restricted to the two spellings that actually occur —
+ * empty-string and `0` — rather than any quoted literal. `if(REF != 'no',
+ * REF, .)` means "use the context value unless it equals no", which is a
+ * VALUE comparison, not an emptiness test; labelling it "use my current
+ * answer if not set" would misdescribe it, so it belongs on the raw path
+ * where its bytes survive untouched.
+ *
  * Only `!=` is matched, and only with `.` as the else-branch. The three
  * bespoke real cells (`if(REF != '', REF,'no')`, `if(REF >0 , REF,0)`,
  * `if(REF != '', REF, if(${taskLmpDate} != '', …))`) deliberately fail
@@ -162,7 +169,7 @@ const CONTACT_SUMMARY_FALLBACK_RE =
  * pre-selection on real files.
  */
 const CONTACT_SUMMARY_GUARDED_RE =
-  /^if\(\s*(instance\('contact-summary'\)\/context\/[\w-]+)\s*!=\s*('(?:[^']*)'|0)\s*,\s*(instance\('contact-summary'\)\/context\/[\w-]+)\s*,\s*\.\s*\)$/;
+  /^if\(\s*(instance\('contact-summary'\)\/context\/[\w-]+)\s*!=\s*(''|""|0)\s*,\s*(instance\('contact-summary'\)\/context\/[\w-]+)\s*,\s*\.\s*\)$/;
 
 /**
  * `coalesce(<ref>, .)` — lumbini's idiom for its whole vaccination series

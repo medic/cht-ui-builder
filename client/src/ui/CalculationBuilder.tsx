@@ -22,7 +22,7 @@
  * NEVER deleted on save — the `'single'` empty-collapse path only fires
  * for genuinely-empty source.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   parseCalculation,
   serializeCalculation,
@@ -74,6 +74,34 @@ function ContextKeyHonestyNote(props: { scan: ContextKeyScan | null }): JSX.Elem
         Couldn’t find this config’s contact-summary <code>context</code>
         {scan.summaryFiles.length > 0 ? ` in ${scan.summaryFiles.join(', ')}` : ''}. You can still
         type a key — it just won’t be checked.
+      </p>
+    );
+  }
+
+  // A form we could not parse is a hole in the list for a reason that has
+  // nothing to do with the contact-summary, so say that separately.
+  if (scan.unreadableForms.length > 0) {
+    const n = scan.unreadableForms.length;
+    return (
+      <p className="muted small wrapper-help">
+        {n === 1 ? '1 form could not be read' : `${n} forms could not be read`} (
+        {scan.unreadableForms.slice(0, 3).join(', ')}
+        {n > 3 ? ', …' : ''}), so any context value only those forms use is missing from this list.
+      </p>
+    );
+  }
+
+  // The definition scan found nothing, yet forms DO read context values. The
+  // list is then only what the forms happen to use — every defined-but-unused
+  // key is missing. An earlier version required `keys.length === 0` as well,
+  // so this exact case rendered nothing at all: a provably partial list
+  // presented as complete, the very thing the note exists to prevent.
+  if (!scan.definitionsFound) {
+    return (
+      <p className="muted small wrapper-help">
+        Couldn’t read this config’s contact-summary
+        {scan.summaryFiles.length > 0 ? ` (${scan.summaryFiles.join(', ')})` : ''}, so this list is
+        only the values your forms already use — not everything the config computes.
       </p>
     );
   }
@@ -175,6 +203,35 @@ function initialModeFor(parsed: ParsedCalculation): Mode {
   // the gallery so the user sees the recipes immediately.
   if (parsed.otherwise.trim() === '') return 'common';
   return 'single';
+}
+
+/**
+ * What Single mode holds for a given cell.
+ *
+ * MUST agree with {@link initialModeFor}, which puts any RECOGNISED reference
+ * into Single mode regardless of what `parseCalculation` thinks of the shape.
+ * Seeding from `parsed.otherwise` alone silently dropped the cell in exactly
+ * that case, because the wrapped `if(...)` idioms parse as `decision_table`
+ * and `otherwise` is just `"."`:
+ *
+ *   if(instance('contact-summary')/context/k, …/k, .)          -> otherwise "."
+ *   if(instance('contact-summary')/context/k != '', …/k, .)    -> otherwise "."
+ *
+ * So the panel opened empty and `save()` wrote `''` over a real calculation —
+ * the parent normalises a zero-length cell to a delete. Measured across the
+ * real configs, that is 87 cells: 47 `if(REF, REF, .)` (this was already
+ * broken for those before the recognizer learned the other idioms) and 40
+ * `if(REF != '', REF, .)`. Found by the adversarial review of that change.
+ *
+ * The bare, `once()` and `coalesce()` spellings all parse as `single`, which
+ * is why the defect stayed invisible.
+ */
+function seedSingleValue(value: string): string {
+  const p = parseCalculation(value);
+  if (p.shape === 'single') return p.otherwise;
+  // Recognised-but-not-'single': Single mode owns the whole cell text.
+  if (value.trim() !== '' && recognizeReference(value)) return value;
+  return '';
 }
 
 /* ============================== templates ================================ */
@@ -288,10 +345,7 @@ export function CalculationBuilder(props: Props) {
   const [parsed, setParsed] = useState<ParsedCalculation>(() => parseCalculation(props.value));
   const [mode, setMode] = useState<Mode>(() => initialModeFor(parseCalculation(props.value)));
   const [rawText, setRawText] = useState<string>(props.value);
-  const [singleValue, setSingleValue] = useState<string>(() => {
-    const p = parseCalculation(props.value);
-    return p.shape === 'single' ? p.otherwise : '';
-  });
+  const [singleValue, setSingleValue] = useState<string>(() => seedSingleValue(props.value));
   const [editingCondIdx, setEditingCondIdx] = useState<number | null>(null);
 
   // Rehydrate from props.value whenever it changes (modal can re-open
@@ -300,7 +354,7 @@ export function CalculationBuilder(props: Props) {
     const p = parseCalculation(props.value);
     setParsed(p);
     setRawText(props.value);
-    setSingleValue(p.shape === 'single' ? p.otherwise : '');
+    setSingleValue(seedSingleValue(props.value));
     setMode(initialModeFor(p));
   }, [props.value]);
 
@@ -575,16 +629,49 @@ function SingleValuePanel(props: {
   const [contextWrapper, setContextWrapper] = useState<ContextWrapper>(
     detectedRef?.kind === 'contact-summary' ? detectedRef.wrapper : 'none',
   );
+  /**
+   * The emptiness sentinel a `guarded-fallback` cell was authored with — `''`
+   * in 36 of the 40 real guarded cells, `0` in the other 4. Held in state so
+   * re-emitting the cell hands back what was written instead of normalising
+   * `!= 0` into `!= ''`, which are NOT equivalent in XPath: for a numeric 0,
+   * `0 != ''` is true (so the context value overwrites the author's answer)
+   * while `0 != 0` is false (so their answer survives).
+   *
+   * Capturing it in `recognizeReference` and then never passing it back to
+   * `emitContactSummary` was the exact "emit a token you did not read" the
+   * field was added to prevent.
+   */
+  const [contextSentinel, setContextSentinel] = useState<string | null>(
+    detectedRef?.kind === 'contact-summary' ? detectedRef.sentinel : null,
+  );
   useEffect(() => {
-    if (detectedRef?.kind === 'contact-summary') setContextWrapper(detectedRef.wrapper);
+    if (detectedRef?.kind === 'contact-summary') {
+      setContextWrapper(detectedRef.wrapper);
+      setContextSentinel(detectedRef.sentinel);
+    }
   }, [detectedRef]);
   // When there is nothing to re-hydrate, start from the idiom this project
   // already uses rather than a constant of ours. Measured, there is no right
   // constant: nssd writes if(REF, REF, .), gandaki and moh-nepal write
   // if(REF != '', REF, .), lumbini writes coalesce(REF, .).
   const houseWrapper = ctxScan?.houseWrapper ?? null;
+  // ONE-SHOT. An earlier version re-ran whenever `detectedRef` changed, which
+  // meant clearing the key box (value -> '', detectedRef -> null) silently
+  // moved the Wrapper dropdown off the user's choice and onto the project
+  // default — so a cell the author had set to `once(...)` saved as the house
+  // idiom instead. The default is only ever a STARTING point.
+  const houseDefaultApplied = useRef(false);
   useEffect(() => {
-    if (!detectedRef && houseWrapper) setContextWrapper(houseWrapper);
+    if (houseDefaultApplied.current) return;
+    if (detectedRef) {
+      // Something to re-hydrate: the cell's own wrapper wins, permanently.
+      houseDefaultApplied.current = true;
+      return;
+    }
+    if (houseWrapper) {
+      setContextWrapper(houseWrapper);
+      houseDefaultApplied.current = true;
+    }
   }, [detectedRef, houseWrapper]);
 
   // Union of project-discovered contact fields + the known-minimal
@@ -606,7 +693,9 @@ function SingleValuePanel(props: {
   }
   function pickContactSummary(key: string, wrapper: ContextWrapper): void {
     setContextWrapper(wrapper);
-    props.onChange(key ? emitContactSummary(key, wrapper) : '');
+    // Hand the authored sentinel straight back. Only meaningful for
+    // guarded-fallback; `emitContactSummary` ignores it otherwise.
+    props.onChange(key ? emitContactSummary(key, wrapper, contextSentinel) : '');
   }
   function pickCrossFormKey(key: string): void {
     // Bridge calcs always use the fallback-to-current wrapper: if the

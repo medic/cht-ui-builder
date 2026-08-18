@@ -125,6 +125,8 @@ export async function registerContactSummaryRoutes(app: FastifyInstance): Promis
       const forms: FormForScan[] = [];
       const eligibility: EligibilityForScan[] = [];
       const wrapperEvidence: string[] = [];
+      /** Forms we could not read, so the UI can say the list is incomplete. */
+      const unreadable: string[] = [];
 
       for (const category of ['app', 'contact'] as const) {
         let dir: string;
@@ -149,7 +151,12 @@ export async function registerContactSummaryRoutes(app: FastifyInstance): Promis
                 if (cell) wrapperEvidence.push(cell);
               }
             } catch {
-              // An unparseable form must not blank the whole picker.
+              // An unparseable form must not blank the whole picker — but it
+              // must not vanish either. Reported below, because a silently
+              // shorter list still LOOKS authoritative, and the author who
+              // cannot find the key that form uses concludes they misspelled
+              // it. Same honesty rule as `indeterminate`.
+              unreadable.push(`${category}/${entry}`);
               continue;
             }
           } else if (/\.properties\.json$/i.test(entry)) {
@@ -182,6 +189,13 @@ export async function registerContactSummaryRoutes(app: FastifyInstance): Promis
         ...scan,
         /** Files the scan actually read, so the UI can be specific. */
         summaryFiles: summaryFiles.map((f) => f.file),
+        /**
+         * Forms whose workbook could not be parsed. Their context reads are
+         * missing from `keys`, so a non-empty list here means the answer is
+         * incomplete for a reason that has nothing to do with the
+         * contact-summary.
+         */
+        unreadableForms: unreadable,
         /**
          * The wrapper idiom this project already uses, so an insert can match
          * it instead of imposing ours. `null` when the project has no context

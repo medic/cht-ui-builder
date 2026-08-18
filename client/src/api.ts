@@ -372,7 +372,12 @@ export const api = {
    */
   getContactSummaryContextKeys: () =>
     jsonFetch<
-      ContextScan & { summaryFiles: string[]; houseWrapper: ContextWrapper | null }
+      ContextScan & {
+        summaryFiles: string[];
+        /** Forms whose workbook could not be parsed, so their reads are absent. */
+        unreadableForms: string[];
+        houseWrapper: ContextWrapper | null;
+      }
     >('/api/contact-summary/context-keys'),
 
   saveContactSummaryFile: (
