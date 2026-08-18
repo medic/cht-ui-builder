@@ -237,6 +237,33 @@ function isDeclaredInInputsContact(survey: SurveyRow[], field: string): boolean 
 }
 
 /**
+ * How many survey rows carry `name`. Group begin/end pairs share a name by
+ * definition, so structural rows are excluded.
+ *
+ * This matters because the label reference this helper produces is
+ * `${harvestName}`, and pyxform resolves `${x}` by NAME across the whole
+ * survey. Two elements with one name make it unresolvable:
+ *
+ *   Could not convert …: There has been a problem trying to replace
+ *   ${patient_id} with the XPath to the survey element named 'patient_id'.
+ *   There are multiple survey elements with this name.
+ *
+ * Real configs live with duplicate names happily — 40 of their app forms
+ * declare `inputs/contact/patient_id` AND carry a top-level calculate called
+ * `patient_id` — because they never write `${patient_id}`. This tool always
+ * writes the reference, so for us uniqueness is a hard requirement.
+ */
+function nameOccurrences(survey: SurveyRow[], name: string): number {
+  let n = 0;
+  for (const r of survey) {
+    const t = r.type.trim().toLowerCase();
+    if (t.startsWith('begin ') || t.startsWith('end ')) continue;
+    if (r.name === name) n++;
+  }
+  return n;
+}
+
+/**
  * Ensure the harvest `calculate` row for `contactField` exists in `form`
  * and return the name to splice into the caller's label.
  *
@@ -280,7 +307,53 @@ export function insertContactFieldRef(
         `"${field}" is a nested path. Declare it under inputs/contact yourself, ` +
         `or the reference will not resolve.`;
     } else {
+      // Declaring `<field>` inside inputs/contact when a row OUTSIDE the
+      // inputs block already carries that name can make a `${<field>}`
+      // reference unresolvable — pyxform refuses the whole workbook, and the
+      // reference that breaks may belong to an edit the author made earlier,
+      // so the failure would look unrelated to this click.
+      //
+      // Narrow on purpose. A duplicate name is only fatal when something
+      // REFERENCES it: 40 real app forms carry `inputs/contact/patient_id`
+      // alongside a top-level calculate called `patient_id` and convert fine,
+      // because they never write `${patient_id}`. So refuse only when the
+      // clash is actually load-bearing:
+      //   (a) the form already contains a `${<field>}` reference, or
+      //   (b) the clashing row is one of OUR harvest calculates, which the
+      //       caller always splices a `${…}` reference to.
+      // Otherwise declare and carry on.
+      //
+      // We cannot resolve it ourselves: the XPath names the declaration, and
+      // renaming the other row would change the report document's field name.
+      const clashing = form.survey.find((r) => {
+        const t = r.type.trim().toLowerCase();
+        if (t.startsWith('begin ') || t.startsWith('end ')) return false;
+        return r.name === field && !isDeclaredInInputsContact([r], field);
+      });
+      const referenced =
+        clashing !== undefined &&
+        (form.survey.some((r) => {
+          const cells = [...Object.values(r.extras), ...Object.values(r.labels)];
+          return cells.some((v) => typeof v === 'string' && v.includes(`\${${field}}`));
+        }) ||
+          (clashing.type.trim().toLowerCase() === 'calculate' &&
+            /^\.\.\/inputs\/contact\//.test((clashing.extras['calculation'] ?? '').trim())));
+
       const endIdx = findInputsContactEnd(form.survey);
+      if (referenced && endIdx >= 0) {
+        return {
+          form,
+          harvestName: '',
+          wasCreated: false,
+          hadNameCollision: false,
+          declaredInput: false,
+          undeclarableReason:
+            `This form already has a question or calculation called "${field}" that ` +
+            `something refers to. Declaring the contact field under inputs/contact ` +
+            `would make that reference ambiguous and the form would stop converting. ` +
+            `Rename that row first.`,
+        };
+      }
       if (endIdx < 0) {
         undeclarableReason =
           'This form has no inputs/contact group, so the contact field cannot be ' +
@@ -325,7 +398,15 @@ export function insertContactFieldRef(
   for (const r of working.survey) {
     if (r.type.trim().toLowerCase() !== 'calculate') continue;
     const c = (r.extras['calculation'] ?? '').trim();
-    if (c === targetCalc) {
+    if (c !== targetCalc) continue;
+    // Only reuse it if `${r.name}` would actually resolve. The scaffold ships
+    // `inputs/contact/patient_id` AND a top-level calculate called
+    // `patient_id`, so picking the contact field `patient_id` used to dedupe
+    // onto that calc and splice an ambiguous `${patient_id}` — a form pyxform
+    // refuses to convert. Falling through creates a uniquely-named harvest
+    // instead, which leaves the scaffold's calc (and therefore the report's
+    // `patient_id` field name) untouched.
+    if (nameOccurrences(working.survey, r.name) === 1) {
       return {
         form: working,
         harvestName: r.name,

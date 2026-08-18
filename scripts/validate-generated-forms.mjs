@@ -96,7 +96,31 @@ function noteRow(label) {
 function generateGoodForm() {
   let form = buildAppFormScaffold({ basename: 'generated_note', title: 'Generated note' });
   const tokens = [];
-  for (const field of ['name', 'sex', 'date_of_birth', 'house_number', 'sickle_cell_test']) {
+  // `patient_id` is in the list on purpose. The scaffold already declares
+  // `inputs/contact/patient_id` AND ships a top-level calculate called
+  // `patient_id`, so the old dedupe path reused that calc's name and spliced
+  // an ambiguous `${patient_id}` — which pyxform refuses outright:
+  //
+  //   Could not convert …: There has been a problem trying to replace
+  //   ${patient_id} with the XPath to the survey element named 'patient_id'.
+  //   There are multiple survey elements with this name.
+  //
+  // That was reachable from a fresh form with one click ("put the patient's
+  // Medic ID in this label") and predates the declare-on-demand work. The
+  // harvest now takes a unique name instead, leaving the scaffold's calc — and
+  // therefore the report's `patient_id` field name — untouched.
+  //
+  // Real configs get away with the duplicate: 40 of their app forms carry both
+  // and convert fine, because they never write `${patient_id}`. This tool
+  // always writes the reference, so uniqueness is a hard requirement for us.
+  for (const field of [
+    'name',
+    'sex',
+    'date_of_birth',
+    'house_number',
+    'sickle_cell_test',
+    'patient_id',
+  ]) {
     const r = insertContactFieldRef(form, field);
     if (r.undeclarableReason) {
       throw new Error(`generator refused to declare "${field}": ${r.undeclarableReason}`);
@@ -196,6 +220,34 @@ try {
         '      accepted, so this guard can no longer detect the defect it exists for.',
     );
     console.error(relevant(bad.output).replace(/^/gm, '        '));
+  }
+
+  // 3. The case we cannot make valid must be REFUSED rather than emitted.
+  //    Inserting `name` gives the harvest the name `patient_name`; declaring
+  //    the contact field `patient_name` afterwards would make the first
+  //    insert's own reference ambiguous, and pyxform rejects the workbook. We
+  //    can neither rename the declaration (the XPath names it) nor the other
+  //    row (that is the report's field name), so the only honest outcome is to
+  //    decline and say why.
+  {
+    let f = buildAppFormScaffold({ basename: 'ambig', title: 'Ambig' });
+    f = insertContactFieldRef(f, 'name').form;
+    const clash = insertContactFieldRef(f, 'patient_name');
+    const declined =
+      clash.harvestName === '' &&
+      /already has a question or calculation/.test(clash.undeclarableReason ?? '');
+    if (declined) {
+      console.log('ok    an unresolvable name clash is declined with a reason, not emitted');
+    } else {
+      failures++;
+      console.error(
+        'FAIL  inserting `patient_name` after `name` produced harvestName="' +
+          clash.harvestName +
+          '" reason="' +
+          clash.undeclarableReason +
+          '". That shape does not convert — it must be declined.',
+      );
+    }
   }
 } finally {
   if (KEEP) console.log(`\nprojects left at ${workRoot}`);

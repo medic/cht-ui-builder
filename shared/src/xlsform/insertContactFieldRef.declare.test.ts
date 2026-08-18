@@ -308,3 +308,111 @@ test('a `contact` group elsewhere in the survey is not the plumbing block', () =
   assert.equal(r.declaredInput, false, 'the unrelated `contact` group is not inputs/contact');
   assert.match(r.undeclarableReason ?? '', /inputs\/contact/);
 });
+
+/* ============ the ${} namespace: a harvest name must be UNIQUE ===========
+ *
+ * The label reference this helper produces is `${harvestName}`, and pyxform
+ * resolves `${x}` by NAME across the whole survey. Two elements with one name
+ * make it unresolvable and the workbook does not convert at all:
+ *
+ *   Could not convert …: There has been a problem trying to replace
+ *   ${patient_id} with the XPath to the survey element named 'patient_id'.
+ *   There are multiple survey elements with this name.
+ *
+ * Real configs live with duplicate names happily — 40 of their app forms
+ * declare `inputs/contact/patient_id` AND carry a top-level calculate called
+ * `patient_id` — because they never write `${patient_id}`. This tool always
+ * writes the reference, so for us uniqueness is a hard requirement, and the
+ * numeric suffix is load-bearing rather than cosmetic.
+ *
+ * Both cases below were found by pointing the real cht-conf + pyxform oracle
+ * at generated forms (scripts/validate-generated-forms.mjs); nothing else we
+ * run could see them.
+ */
+
+/** Rows that actually occupy the `${}` namespace (group markers don't). */
+function nameCounts(survey: readonly SurveyRow[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of survey) {
+    const t = r.type.trim().toLowerCase();
+    if (t.startsWith('begin ') || t.startsWith('end ')) continue;
+    if (r.name) m.set(r.name, (m.get(r.name) ?? 0) + 1);
+  }
+  return m;
+}
+
+test('picking `patient_id` does not splice an ambiguous reference', () => {
+  // Reachable from a fresh form in ONE click — "put the patient's Medic ID in
+  // this label" — and it predates the declare-on-demand work. The scaffold
+  // ships BOTH `inputs/contact/patient_id` and a top-level calculate called
+  // `patient_id`, so the dedupe path used to reuse that calc's name.
+  const r = insertContactFieldRef(buildAppFormScaffold({ basename: 'demo' }), 'patient_id');
+  expect: {
+    // The reference the caller will splice must resolve to exactly one row.
+    const counts = nameCounts(r.form.survey);
+    assert.equal(
+      counts.get(r.harvestName),
+      1,
+      `\${${r.harvestName}} must name exactly one survey element`,
+    );
+  }
+  // And the scaffold's own `patient_id` calc is left alone: its name is the
+  // report's field name, so renaming it to resolve the clash would silently
+  // change the submitted document's schema.
+  const scaffoldCalc = r.form.survey.find(
+    (x) =>
+      x.name === 'patient_id' &&
+      x.type.trim().toLowerCase() === 'calculate' &&
+      (x.extras['calculation'] ?? '') === '../inputs/contact/patient_id',
+  );
+  assert.ok(scaffoldCalc, "the scaffold's patient_id calculate is untouched");
+  assert.notEqual(r.harvestName, 'patient_id', 'so the harvest takes a free name instead');
+});
+
+test('a field already `patient_`-prefixed still gets a unique harvest name', () => {
+  // `deriveHarvestName('patient_name')` returns it verbatim, which collides
+  // with the declaration this same call writes. Guaranteed, not incidental.
+  const r = insertContactFieldRef(buildAppFormScaffold({ basename: 'demo' }), 'patient_name');
+  assert.equal(r.declaredInput, true);
+  assert.notEqual(r.harvestName, 'patient_name');
+  assert.equal(nameCounts(r.form.survey).get(r.harvestName), 1);
+  assert.equal(
+    nameCounts(r.form.survey).get('patient_name'),
+    1,
+    'only the declaration carries the bare field name',
+  );
+  assertEveryInputRefResolves(r.form, 'patient_-prefixed field');
+});
+
+test('an unresolvable clash is DECLINED with a reason, never emitted', () => {
+  // Order-dependent: inserting `name` names the harvest `patient_name`, and
+  // declaring the contact field `patient_name` afterwards would make the FIRST
+  // insert's own reference ambiguous. We can rename neither the declaration
+  // (the XPath names it) nor the other row (that is the report's field name),
+  // so the only honest outcome is to decline.
+  const first = insertContactFieldRef(buildAppFormScaffold({ basename: 'demo' }), 'name');
+  assert.equal(first.harvestName, 'patient_name');
+
+  const clash = insertContactFieldRef(first.form, 'patient_name');
+  assert.equal(clash.harvestName, '', 'nothing is spliced');
+  assert.equal(clash.form, first.form, 'and nothing is written');
+  assert.match(clash.undeclarableReason ?? '', /already has a question or calculation/);
+  assert.match(clash.undeclarableReason ?? '', /patient_name/);
+});
+
+test('the reverse order needs no refusal — both inserts succeed', () => {
+  // Same two fields, other way round: the declaration lands first, so each
+  // harvest simply takes the next free name. Worth pinning so the refusal
+  // above is understood as narrow rather than a blanket ban.
+  let form = buildAppFormScaffold({ basename: 'demo' });
+  const a = insertContactFieldRef(form, 'patient_name');
+  assert.equal(a.undeclarableReason, null);
+  form = a.form;
+  const b = insertContactFieldRef(form, 'name');
+  assert.equal(b.undeclarableReason, null);
+  const counts = nameCounts(b.form.survey);
+  assert.equal(counts.get(a.harvestName), 1);
+  assert.equal(counts.get(b.harvestName), 1);
+  assert.notEqual(a.harvestName, b.harvestName);
+  assertEveryInputRefResolves(b.form, 'both fields, declaration first');
+});
