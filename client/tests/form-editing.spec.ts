@@ -130,9 +130,10 @@ test('choices — rename a list from the Choices tab updates the survey row type
 
   await page.getByRole('button', { name: /^Choices/ }).click();
   const choicesTab = page.locator('.choices-tab');
-  const dangerSection = choicesTab
-    .locator('section.choice-list')
-    .filter({ has: page.locator('h3', { hasText: 'danger_signs' }) });
+  // Selected by data-list-name, not by the heading: rename mode swaps the
+  // <h3> for an input, so a heading-based filter stops matching as soon as
+  // rename is clicked and the rename input can never be found.
+  const dangerSection = choicesTab.locator('section.choice-list[data-list-name="danger_signs"]');
   await expect(dangerSection).toBeVisible();
 
   // Click "rename", fill the new name, accept the confirm.
@@ -492,7 +493,11 @@ test('§B2 — ungroup round-trips through the UI + on-disk form', async ({
     const beforeBody = (await before.json()) as {
       form: { survey: Array<{ name: string; type: string }> };
     };
-    expect(beforeBody.form.survey.length).toBe(12); // 10 fixture + 2 triage begin/end
+    // 11 fixture rows + 2 triage begin/end. The fixture gained `chair_rise`
+    // (a select_one pass_fail) in c66cfcb and this count was not updated with
+    // it, so assert against the parsed fixture rather than a literal that goes
+    // stale the next time a row is added.
+    expect(beforeBody.form.survey.length).toBe(13);
 
     // Ungroup the triage container via its header link. The shared
     // planUngroup decision returned `kind:'ok'` and the inline patch
@@ -523,7 +528,9 @@ test('§B2 — ungroup round-trips through the UI + on-disk form', async ({
     const remainingTriage = afterBody.form.survey.filter((r) => r.name === 'triage');
     expect(remainingTriage).toHaveLength(0);
     // Row count dropped by exactly 2 (the begin + the end shell rows).
-    expect(afterBody.form.survey.length).toBe(10);
+    // Back to the fixture's own 11 rows: ungrouping removed only the two
+    // begin/end shell rows, which is the whole point of the assertion.
+    expect(afterBody.form.survey.length).toBe(11);
   } finally {
     await fs.rm(tmpProject, { recursive: true, force: true });
   }

@@ -73,7 +73,7 @@ import {
   type ConditionColumn,
   type ReportFieldChoice,
   type Subgroup,
-} from '@cht-ui/shared';
+  inputsBlockRowIds,} from '@cht-ui/shared';
 import { api } from '../api.js';
 import { useApp } from '../state/store.js';
 import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
@@ -1202,10 +1202,41 @@ function SurveyTab(props: {
     if (item.kind === 'row') {
       const row = item.row;
       const idx = form.survey.findIndex((r) => r.rowId === row.rowId);
-      const earlierFields = form.survey
-        .slice(0, idx)
-        .filter((r) => !isStructural(r) && r.name)
-        .map((r) => r.name);
+      // Rows inside the `inputs` block are withheld, and the list is deduped.
+      // Both matter for the same reason: `${x}` resolves by NAME across the
+      // whole survey, and the inputs block deliberately reuses names from
+      // outside it — the scaffold has `inputs/user/name` and
+      // `inputs/contact/name`, plus `inputs/contact/patient_id` next to a
+      // top-level calculate called `patient_id`. Offering those let one click
+      // splice a `${name}` that pyxform refuses to resolve, failing the whole
+      // project. The harvest calculate is the sanctioned way to reach an input
+      // and it sits outside the block, so it is still offered.
+      const plumbingIds = inputsBlockRowIds(form.survey);
+      // Only names that will actually RESOLVE. Withholding the inputs block is
+      // not sufficient on its own: the scaffold's top-level `patient_id`
+      // calculate shares its name with `inputs/contact/patient_id`, so
+      // `${patient_id}` is ambiguous however few times the picker lists it.
+      // The author who wants that value uses the contact-field insert, which
+      // creates a uniquely-named harvest row.
+      const nameCount = new Map<string, number>();
+      for (const r of form.survey) {
+        if (isStructural(r) || !r.name) continue;
+        nameCount.set(r.name, (nameCount.get(r.name) ?? 0) + 1);
+      }
+      const earlierFields = [
+        ...new Set(
+          form.survey
+            .slice(0, idx)
+            .filter(
+              (r) =>
+                !isStructural(r) &&
+                r.name &&
+                !plumbingIds.has(r.rowId) &&
+                nameCount.get(r.name) === 1,
+            )
+            .map((r) => r.name),
+        ),
+      ];
       return (
         <SurveyRowCard
           key={row.rowId}
@@ -3620,7 +3651,10 @@ function ChoicesTab(props: {
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onChoiceDragEnd}>
         {grouped.map((g) => (
-          <section key={g.list_name} className="choice-list">
+          // `data-list-name` is a STABLE handle: rename mode replaces the
+          // <h3> with an input, so anything selecting the section by its
+          // heading text stops matching the moment rename is clicked.
+          <section key={g.list_name} className="choice-list" data-list-name={g.list_name}>
             <header className="row gap">
               {renamingList === g.list_name ? (
                 <>

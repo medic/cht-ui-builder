@@ -153,3 +153,66 @@ test('contact-summary ORed with selected() round-trips', () => {
   assert.equal(parsed.rules[1]!.kind, 'selected');
   assert.equal(serializeRelevant(parsed), input);
 });
+
+
+/* ====== the relevant column must not lose structured editing ============
+ *
+ * Teaching the recognizer `coalesce` and `guarded-fallback` made those cells
+ * RECOGNISABLE here, and that turned out to be a regression rather than a win
+ * until the two fixes below:
+ *
+ *  - the emitters write one canonical spacing, but 17 of lumbini's real reads
+ *    are `coalesce(REF,.)` with no space. Re-serialising with the canonical
+ *    spacing failed the round-trip self-check, and the self-check demotes the
+ *    WHOLE expression to a single raw rule — so an untouched sibling clause
+ *    lost its editable row. Bytes were never at risk; structured editing was.
+ *
+ *  - the clause splitter took the first operator ANYWHERE, so
+ *    `if(REF != '', REF, .) = 'true'` — exactly what the relevant builder now
+ *    emits for guarded-fallback — was cut at the `!=` inside the `if(`.
+ *
+ * Every case asserts BOTH: byte-identical round-trip, and that the sibling
+ * clause keeps its own structured rule.
+ */
+
+const CS = (k: string) => `instance('contact-summary')/context/${k}`;
+
+for (const [label, src] of [
+  ['tight coalesce, lumbini spelling', `coalesce(${CS('vacc_ctx')},.) = 'yes' and \${age} > 5`],
+  ['spaced coalesce', `coalesce(${CS('vacc_ctx')}, .) = 'yes' and \${age} > 5`],
+  [
+    'guarded fallback',
+    `if(${CS('show')} != '', ${CS('show')}, .) = 'true' and \${age} > 5`,
+  ],
+  [
+    'guarded fallback with the 0 sentinel',
+    `if(${CS('lmp')} != 0, ${CS('lmp')}, .) = 'true' and \${age} > 5`,
+  ],
+  ['bare reference', `${CS('show')} = 'true' and \${age} > 5`],
+  ['read-once', `once(${CS('bmi')}) = '1' and \${age} > 5`],
+] as const) {
+  test(`relevant: ${label} stays structured AND byte-identical`, () => {
+    const parsed = parseRelevant(src);
+    assert.deepEqual(
+      parsed.rules.map((r) => r.kind),
+      ['contact-summary-comparison', 'comparison'],
+      'both clauses keep their own structured rule',
+    );
+    assert.equal(serializeRelevant(parsed), src, 'and the bytes are unchanged');
+  });
+}
+
+test('relevant: changing the key drops the authored spelling for the canonical one', () => {
+  // `refSource` is only trusted while it still describes the rule — otherwise
+  // editing the key in the builder would re-emit the OLD reference.
+  const parsed = parseRelevant(`coalesce(${CS('old_key')},.) = 'yes'`);
+  const rule = parsed.rules[0];
+  assert.equal(rule?.kind, 'contact-summary-comparison');
+  const edited = {
+    ...parsed,
+    rules: [{ ...rule, contextKey: 'new_key' }],
+  } as typeof parsed;
+  const out = serializeRelevant(edited);
+  assert.match(out, /coalesce\(instance\('contact-summary'\)\/context\/new_key, \.\)/);
+  assert.equal(out.includes('old_key'), false);
+});

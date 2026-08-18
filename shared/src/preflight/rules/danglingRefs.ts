@@ -77,8 +77,16 @@ const REF_RE = /\$\{([^}]*)\}/g;
  *
  * Deliberately not anchored: these appear inside larger expressions, e.g.
  * cht-core's own `concat(../../inputs/meta/location/lat, …)`.
+ *
+ * The `../` steps are captured too. They are NOT decoration: cht-conf's
+ * check-xpaths-exist resolves a relative XPath from the referencing node, so a
+ * wrong step count is itself an unresolvable reference. Measured over all 573
+ * `(../)+inputs/…` references in the five real config roots, the count equals
+ * the row's group depth + 1 in 573 of 573 — fully determined, so a mismatch is
+ * never legal. An earlier version discarded the prefix and documented that as
+ * safe, which made the gate silent on the very error class it exists to catch.
  */
-const INPUT_XPATH_RE = /(?:\.\.\/)+inputs\/([A-Za-z0-9_/-]+)/g;
+const INPUT_XPATH_RE = /((?:\.\.\/)+)inputs\/([A-Za-z0-9_/-]+)/g;
 
 /**
  * The one subtree CHT genuinely injects, so a reference into it needs no
@@ -159,7 +167,18 @@ export function runDanglingRefsRule(ctx: PreflightContext): PreflightResult[] {
   for (const { formId, xlsform } of ctx.forms) {
     const names = buildNameSet(xlsform.survey);
     const declaredInputs = declaredInputPaths(xlsform.survey);
+    // Group depth of the row being scanned, for the `../` step-count check.
+    let groupDepth = 0;
     for (const row of xlsform.survey) {
+      const kind = structuralKind(row);
+      if (kind?.edge === 'begin') {
+        groupDepth++;
+        continue;
+      }
+      if (kind?.edge === 'end') {
+        groupDepth--;
+        continue;
+      }
       if (isStructural(row)) continue;
       for (const { column, expr } of refBearingCells(row)) {
         // Channel 2 — bare `../inputs/…` XPaths. Runs before the `${…}`
@@ -168,8 +187,28 @@ export function runDanglingRefsRule(ctx: PreflightContext): PreflightResult[] {
         const xre = new RegExp(INPUT_XPATH_RE.source, 'g');
         let xm: RegExpExecArray | null;
         while ((xm = xre.exec(expr)) !== null) {
-          const inputPath = xm[1] ?? '';
-          if (!inputPath || isRuntimeInjectedInput(inputPath)) continue;
+          const steps = (xm[1] ?? '').length / 3;
+          const inputPath = xm[2] ?? '';
+          if (!inputPath) continue;
+          // Step count first: it is wrong independently of whether the target
+          // is declared, and `inputs/meta/*` needs the right number of steps
+          // even though it needs no declaration.
+          if (steps !== groupDepth + 1) {
+            results.push({
+              ruleId: 'dangling-refs',
+              severity: 'error',
+              message:
+                `"${xm[0]}" in ${column} climbs ${steps} level${steps === 1 ? '' : 's'} but ` +
+                `this row sits ${groupDepth} group${groupDepth === 1 ? '' : 's'} deep, so it ` +
+                `needs ${groupDepth + 1}. cht-conf resolves the path from the row itself and ` +
+                `rejects the whole project when it does not resolve.`,
+              affectedItemId: formId,
+              rowId: row.rowId,
+              column,
+            });
+            continue;
+          }
+          if (isRuntimeInjectedInput(inputPath)) continue;
           if (declaredInputs.has(inputPath)) continue;
           results.push({
             ruleId: 'dangling-refs',

@@ -33,7 +33,7 @@ import { strict as assert } from 'node:assert';
 import { insertContactFieldRef } from './insertContactFieldRef.js';
 import { buildAppFormScaffold } from './scaffolds.js';
 import { findStructuralViolations } from './structuralBalance.js';
-import type { SurveyRow, XLSForm } from './types.js';
+import { inputsBlockRowIds, isStructural, type SurveyRow, type XLSForm } from './types.js';
 
 /* ------------------------- the hermetic oracle -------------------------- */
 
@@ -415,4 +415,77 @@ test('the reverse order needs no refusal — both inserts succeed', () => {
   assert.equal(counts.get(b.harvestName), 1);
   assert.notEqual(a.harvestName, b.harvestName);
   assertEveryInputRefResolves(b.form, 'both fields, declaration first');
+});
+
+
+/* ============ the inputs block is not a ${} namespace ==================== */
+
+test('inputsBlockRowIds covers every row inside inputs, and nothing outside', () => {
+  const form = buildAppFormScaffold({ basename: 'demo' });
+  const ids = inputsBlockRowIds(form.survey);
+  const inside = form.survey.filter((r) => ids.has(r.rowId)).map((r) => r.name);
+  // Everything the scaffold declares under inputs, nested groups included.
+  assert.deepEqual(inside, [
+    'source',
+    'contact_id',
+    'facility_id',
+    'name',
+    '_id',
+    'patient_id',
+    'name',
+  ]);
+  // The harvest calculates sit OUTSIDE and stay referenceable — that is the
+  // sanctioned way to reach an input.
+  const outside = form.survey
+    .filter((r) => !ids.has(r.rowId) && r.type === 'calculate')
+    .map((r) => r.name);
+  assert.deepEqual(outside, [
+    'patient_uuid',
+    'patient_id',
+    'created_by',
+    'created_by_person_uuid',
+  ]);
+});
+
+test('withholding the inputs block leaves NO ambiguous ${} target', () => {
+  // The defect: the field picker mapped every earlier row's name with no dedup
+  // and no plumbing filter, so on the scaffold it offered `name` twice (from
+  // inputs/user/name and inputs/contact/name) and `patient_id` twice (from
+  // inputs/contact/patient_id and the top-level calculate). One click then
+  // spliced a `${name}` that pyxform refuses to resolve, failing the whole
+  // project. The `patient_id` half was pre-existing; the `name` half arrived
+  // with the scaffold row added for P1-DEPLOY.
+  const form = buildAppFormScaffold({ basename: 'demo' });
+  const ids = inputsBlockRowIds(form.survey);
+  const nameCount = new Map<string, number>();
+  for (const r of form.survey) {
+    if (isStructural(r) || !r.name) continue;
+    nameCount.set(r.name, (nameCount.get(r.name) ?? 0) + 1);
+  }
+  const offered = [
+    ...new Set(
+      form.survey
+        .filter(
+          (r) => !isStructural(r) && r.name && !ids.has(r.rowId) && nameCount.get(r.name) === 1,
+        )
+        .map((r) => r.name),
+    ),
+  ];
+  // Every offered name must resolve to exactly one element in the survey.
+  for (const n of offered) {
+    const count = form.survey.filter((r) => !isStructural(r) && r.name === n).length;
+    assert.equal(count, 1, `\${${n}} must name exactly one survey element`);
+  }
+  // And the plumbing names are gone rather than merely deduped — picking
+  // `source` or `_id` in a label was never meaningful.
+  for (const n of ['source', 'contact_id', 'facility_id', '_id']) {
+    assert.equal(offered.includes(n), false, `${n} is inputs plumbing`);
+  }
+  // And `patient_id` is withheld too: the scaffold's top-level calculate
+  // shares its name with `inputs/contact/patient_id`, so `${patient_id}` could
+  // never resolve however few times it was listed. cht-core's own convention
+  // creates that pair — 40 real app forms carry it — and they are fine only
+  // because they never write the reference.
+  assert.equal(offered.includes('patient_id'), false);
+  assert.ok(offered.includes('patient_uuid'), 'the unambiguous harvest calcs remain');
 });

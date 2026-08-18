@@ -84,27 +84,67 @@ test('the braced spelling is judged the same way, and reported once', () => {
   assert.match(results[0]?.message ?? '', /inputs\/contact\/sex/);
 });
 
-test('the ../ step count is irrelevant — only the path inside inputs matters', () => {
-  // A cell two groups deep legitimately needs `../../../inputs/user/name`.
-  // The step count depends on where the cell sits, not on which node is
-  // meant, so it must not change the verdict either way.
-  for (const prefix of ['../', '../../', '../../../']) {
-    const ok = mkForm([
-      ...inputsBlock(),
-      surveyRow('calculate', 'created_by', { calculation: `${prefix}inputs/user/name` }),
-    ]);
-    assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: ok }])), [], prefix);
+test('the ../ step count must match the row depth — it is not decoration', () => {
+  // An earlier version of this rule discarded the step count, documenting that
+  // as safe because "it does not change WHICH node is meant". True about
+  // intent, false about resolution: cht-conf resolves a relative XPath from
+  // the referencing node, so a wrong count IS an unresolvable reference and
+  // the gate was silent on it.
+  //
+  // Measured over all 573 `(../)+inputs/…` references in the five real config
+  // roots: steps === the row's group depth + 1 in 573 of 573. Fully
+  // determined, so a mismatch is never legal.
+  //
+  // Depth 0 — one step.
+  const okTop = mkForm([
+    ...inputsBlock(),
+    surveyRow('calculate', 'created_by', { calculation: '../inputs/user/name' }),
+  ]);
+  assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: okTop }])), []);
 
+  for (const wrong of ['../../', '../../../']) {
     const bad = mkForm([
       ...inputsBlock(),
-      surveyRow('calculate', 'nope', { calculation: `${prefix}inputs/user/nonexistent` }),
+      surveyRow('calculate', 'created_by', { calculation: `${wrong}inputs/user/name` }),
     ]);
-    assert.equal(
-      runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: bad }])).length,
-      1,
-      prefix,
-    );
+    const res = runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: bad }]));
+    assert.equal(res.length, 1, wrong);
+    assert.match(res[0]?.message ?? '', /needs 1/);
   }
+});
+
+test('a row two groups deep needs exactly three steps', () => {
+  // The other direction: deeper rows legitimately need more steps, and the
+  // right count must PASS. cht-core's own contact forms reach
+  // `../../../inputs/user/name` from inside two groups.
+  const deep = (calc: string) =>
+    mkForm([
+      ...inputsBlock(),
+      surveyRow('begin group', 'outer'),
+      surveyRow('begin group', 'inner'),
+      surveyRow('calculate', 'created_by', { calculation: calc }),
+      surveyRow('end group', 'inner'),
+      surveyRow('end group', 'outer'),
+    ]);
+  assert.deepEqual(
+    runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: deep('../../../inputs/user/name') }])),
+    [],
+  );
+  assert.equal(
+    runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: deep('../inputs/user/name') }])).length,
+    1,
+    'too few steps is just as unresolvable as too many',
+  );
+});
+
+test('an undeclared target is still reported when the step count is right', () => {
+  const bad = mkForm([
+    ...inputsBlock(),
+    surveyRow('calculate', 'nope', { calculation: '../inputs/user/nonexistent' }),
+  ]);
+  const res = runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: bad }]));
+  assert.equal(res.length, 1);
+  assert.match(res[0]?.message ?? '', /does not declare/);
 });
 
 test('inputs/meta/* needs no declaration — measured, it really is injected', () => {
@@ -113,12 +153,16 @@ test('inputs/meta/* needs no declaration — measured, it really is injected', (
   // with no `meta` group declared anywhere, and it deploys. 31 forms across
   // the four real configs and our four templates do this, so requiring a
   // declaration here would flag all of them — including our own.
+  // The real cell sits INSIDE a group, which is why it climbs two levels —
+  // so the fixture has to nest it, or the (correct) step-count check fires.
   const form = mkForm([
     ...inputsBlock(),
+    surveyRow('begin group', 'place'),
     surveyRow('calculate', 'geolocation', {
       calculation:
         "concat(../../inputs/meta/location/lat, concat(' ', ../../inputs/meta/location/long))",
     }),
+    surveyRow('end group', 'place'),
   ]);
   assert.deepEqual(runDanglingRefsRule(mkContext([{ formId: 'app', xlsform: form }])), []);
 });

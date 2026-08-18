@@ -127,6 +127,26 @@ export interface ContactSummaryComparisonRule {
   contextKey: string;
   /** Wrapper around the reference — `none` is the bare ref. */
   wrapper: import('./calcReference.js').ContextWrapper;
+  /**
+   * The emptiness sentinel of a `guarded-fallback` reference, verbatim — `''`
+   * or `0`. They are not interchangeable, so it is carried rather than
+   * normalised. `null`/absent for every other wrapper.
+   */
+  sentinel?: string | null;
+  /**
+   * The reference EXACTLY as the author wrote it, when this rule was parsed
+   * from an existing cell.
+   *
+   * Re-emitted verbatim as long as it still describes the same key, wrapper
+   * and sentinel, because the emitters write one canonical spacing while real
+   * cells do not: 17 of lumbini's context reads are `coalesce(REF,.)` with no
+   * space. Once the recognizer learned that idiom, re-serialising it with the
+   * canonical spacing failed the round-trip self-check, and the self-check
+   * demotes the WHOLE expression to one raw rule — so an untouched sibling
+   * clause like `${age} > 5` silently lost its editable row. Bytes were never
+   * at risk; structured editing was.
+   */
+  refSource?: string;
   op: Operator;
   value: string;
   valueIsString: boolean;
@@ -359,6 +379,15 @@ function parseSinglePart(part: string): Rule {
     return { kind: 'comparison', field: cmp[1], op, value: valueRaw, valueIsString: false };
   }
 
+  // Split at the first comparison operator that sits OUTSIDE any brackets or
+  // quotes. A lazy regex found the first operator anywhere, so
+  // `if(REF != '', REF, .) = 'true'` — what the relevant builder now emits for
+  // the guarded-fallback wrapper — was cut at the `!=` INSIDE the `if(`,
+  // leaving `if(REF` as the left-hand side. The recognizer rejected that, the
+  // clause fell to raw, and the whole expression demoted with it.
+  //
+  // Longest operators first so `>=` / `<=` / `!=` beat the prefixes `>` `<` `=`.
+  //
   // Phase 1b — contact-input / contact-summary comparison. The LHS is
   // recognized via the SAME `recognizeReference()` the calc builder
   // uses, so a clause like `../inputs/contact/sex = 'female'` or
@@ -372,11 +401,11 @@ function parseSinglePart(part: string): Rule {
   // beat the prefix `>`/`<`/`=`), feed the LHS into recognizeReference,
   // route the value through the same string-quote/literal logic as
   // ComparisonRule above.
-  const opSplit = /^(.+?)\s*(>=|<=|!=|=|>|<)\s*(.+)$/.exec(t);
-  if (opSplit && opSplit[1] && opSplit[2] && opSplit[3] !== undefined) {
-    const lhsRaw = opSplit[1].trim();
-    const op: Operator = opSplit[2] as Operator;
-    const valueRaw = opSplit[3].trim();
+  const opSplit = splitAtTopLevelOperator(t);
+  if (opSplit) {
+    const lhsRaw = opSplit.lhs.trim();
+    const op: Operator = opSplit.op as Operator;
+    const valueRaw = opSplit.rhs.trim();
     const recognized = recognizeReference(lhsRaw);
     if (recognized && recognized.kind === 'contact-input') {
       const m = /^'([^']*)'$/.exec(valueRaw);
@@ -404,6 +433,8 @@ function parseSinglePart(part: string): Rule {
           kind: 'contact-summary-comparison',
           contextKey: recognized.argument,
           wrapper: recognized.wrapper,
+          sentinel: recognized.sentinel,
+          refSource: lhsRaw,
           op,
           value: m[1],
           valueIsString: true,
@@ -459,11 +490,78 @@ function ruleToString(rule: Rule): string {
     }
     case 'contact-summary-comparison': {
       const v = rule.valueIsString ? `'${rule.value.replace(/'/g, "\\'")}'` : rule.value;
-      return `${emitContactSummary(rule.contextKey, rule.wrapper)} ${rule.op} ${v}`;
+      return `${contactSummaryRefSource(rule)} ${rule.op} ${v}`;
     }
     case 'raw':
       return rule.text;
   }
+}
+
+/**
+ * The reference text for a contact-summary comparison: the author's own
+ * spelling while it still describes this rule, otherwise the canonical form.
+ *
+ * Re-checking rather than trusting `refSource` blindly matters — the user can
+ * change the key or the wrapper in the builder, and stale authored text would
+ * then emit the OLD reference.
+ */
+function contactSummaryRefSource(rule: ContactSummaryComparisonRule): string {
+  const authored = rule.refSource?.trim();
+  if (authored) {
+    const rec = recognizeReference(authored);
+    if (
+      rec &&
+      rec.kind === 'contact-summary' &&
+      rec.argument === rule.contextKey &&
+      rec.wrapper === rule.wrapper &&
+      (rec.sentinel ?? null) === (rule.sentinel ?? null)
+    ) {
+      return authored;
+    }
+  }
+  return emitContactSummary(rule.contextKey, rule.wrapper, rule.sentinel ?? null);
+}
+
+/**
+ * Split `t` at the first comparison operator outside brackets and quotes.
+ * `null` when there is none at top level.
+ */
+function splitAtTopLevelOperator(
+  t: string,
+): { lhs: string; op: string; rhs: string } | null {
+  let depth = 0;
+  let i = 0;
+  while (i < t.length) {
+    const c = t[i];
+    if (c === "'" || c === '"') {
+      const q = c;
+      i++;
+      while (i < t.length && t[i] !== q) i += t[i] === '\\' ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === '(' || c === '[') {
+      depth++;
+      i++;
+      continue;
+    }
+    if (c === ')' || c === ']') {
+      depth--;
+      i++;
+      continue;
+    }
+    if (depth === 0) {
+      const two = t.slice(i, i + 2);
+      if (two === '>=' || two === '<=' || two === '!=') {
+        return { lhs: t.slice(0, i), op: two, rhs: t.slice(i + 2) };
+      }
+      if (c === '=' || c === '>' || c === '<') {
+        return { lhs: t.slice(0, i), op: c, rhs: t.slice(i + 1) };
+      }
+    }
+    i++;
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------------ */

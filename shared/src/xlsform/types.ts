@@ -307,6 +307,46 @@ export function computeSimpleHiddenRowIds(survey: SurveyRow[]): Set<string> {
  * author just added and hasn't filled in) is also not plumbing, which is
  * what makes the Calculate tile usable in Simple mode.
  */
+/**
+ * Row ids that live INSIDE the outermost `inputs` group.
+ *
+ * These are never valid `${…}` targets. pyxform resolves `${x}` by name across
+ * the whole survey, and the inputs block deliberately reuses names that also
+ * appear outside it — the standard scaffold declares `inputs/user/name` AND
+ * `inputs/contact/name`, and `inputs/contact/patient_id` alongside a top-level
+ * calculate called `patient_id`. Offering those as pickable field references
+ * produced `${name}` / `${patient_id}`, which pyxform refuses outright:
+ *
+ *   There has been a problem trying to replace ${name} with the XPath to the
+ *   survey element named 'name'. There are multiple survey elements with this
+ *   name.
+ *
+ * The sanctioned way to reach an input is the harvest calculate
+ * (`../inputs/contact/<field>`), which `insertContactFieldRef` creates — and
+ * that row sits outside the block, so it stays offerable.
+ *
+ * Measured: all 492 `(../)+inputs/…` references across the real configs use
+ * the XPath form. Not one reaches an input through `${…}`, so nothing real is
+ * lost by withholding them.
+ */
+export function inputsBlockRowIds(survey: readonly SurveyRow[]): Set<string> {
+  const ids = new Set<string>();
+  let depth = 0;
+  for (const row of survey) {
+    const k = structuralKind(row);
+    if (k?.edge === 'begin') {
+      if (depth > 0 || row.name === CHT_INPUTS_GROUP) depth++;
+      continue;
+    }
+    if (k?.edge === 'end') {
+      if (depth > 0) depth--;
+      continue;
+    }
+    if (depth > 0) ids.add(row.rowId);
+  }
+  return ids;
+}
+
 export function isInputsPlumbingCalculate(row: SurveyRow): boolean {
   if (row.type.trim().toLowerCase() !== 'calculate') return false;
   const calc = (row.extras['calculation'] ?? '').trim();
