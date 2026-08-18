@@ -127,16 +127,22 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter @cht-ui/client exec playwright install --with-deps chromium
 
-      - name: Run e2e (condition-builder + form-editing + fhir-mapping + form-data-passing + quick-hierarchy + contact-form-tile-classification + form-context-types + hierarchy-ux-polish + poc-build + anc-build + geriatric-blockers)
+      - name: Run e2e (condition-builder + form-editing + fhir-mapping + form-data-passing + quick-hierarchy + contact-form-tile-classification + form-context-types + hierarchy-ux-polish + poc-build + anc-build + geriatric-blockers + pick-preexisting-values)
         # anc-build-deploy runs CI-safe by default (build + on-disk assertions only);
         # ANC_OUTPUT_DIR gives it a Linux-portable path, and the live deploy stays
         # off (it only runs under LIVE_DEPLOY=1, which CI never sets).
         # geriatric-blockers covers the choice-value dropdowns (§1) and the OR
         # authoring → &&-guard round-trip (§3) against mini-config; its write
         # leg copies the fixture to a temp dir first, so it's hermetic.
+        # pick-preexisting-values is the acceptance for
+        # docs/plans/pick-preexisting-context-values.md: it drives BOTH halves
+        # of "insert a reference to a value that already exists" through the UI
+        # and asserts the produced form has no dangling ../inputs ref — the
+        # defect that used to fail validate-app-forms for the whole project.
+        # It copies the fixture to a temp dir too.
         env:
           ANC_OUTPUT_DIR: ${{ runner.temp }}/anc-build
-        run: pnpm --filter @cht-ui/client exec playwright test condition-builder.spec.ts form-editing.spec.ts fhir-mapping.spec.ts form-data-passing.spec.ts quick-hierarchy.spec.ts contact-form-tile-classification.spec.ts form-context-types.spec.ts hierarchy-ux-polish.spec.ts poc-build.spec.ts anc-build-deploy.spec.ts geriatric-blockers.spec.ts
+        run: pnpm --filter @cht-ui/client exec playwright test condition-builder.spec.ts form-editing.spec.ts fhir-mapping.spec.ts form-data-passing.spec.ts quick-hierarchy.spec.ts contact-form-tile-classification.spec.ts form-context-types.spec.ts hierarchy-ux-polish.spec.ts poc-build.spec.ts anc-build-deploy.spec.ts geriatric-blockers.spec.ts pick-preexisting-values.spec.ts
 
       - name: Upload Playwright report on failure
         if: failure()
