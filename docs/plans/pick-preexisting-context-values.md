@@ -146,6 +146,69 @@ because it only scans inside the last `return`, where the real export is `contex
 
 ---
 
+## ⚠️ Project-agnostic check — measured across all four configs on disk
+
+**PO challenge (2026-08-14): "is this project-agnostic? I don't want it to be only for NSSD."**
+Right question. Measured rather than argued — `config-gandaki`, `config-lumbini`,
+`config-moh-nepal`, `config-nssd`.
+
+### VALIDATED as universal — safe to build on
+**`inputs/contact/name` is referenced by essentially every app form in every config:**
+
+| Config | app forms referencing `inputs/contact/name` |
+|---|---|
+| config-gandaki | **7 of 7** |
+| config-lumbini | **12 of 12** |
+| config-nssd | **36 of 37** |
+
+**55 of 56 across three configs.** Scaffolding `name` is a CHT-wide correctness fix, not an NSSD
+accommodation. The PO's scope call is strongly supported.
+
+The reference *syntaxes* are also CHT core, not per-config: `instance('contact-summary')/context/<key>`
+in calculations and `summary.<key>` in eligibility expressions.
+
+### ❌ CORRECTED — `once()` is NOT a house idiom, and this spec was wrong to say so
+An earlier revision said *"NSSD's forms read context as `once(instance(…))` — match the house
+idiom."* That was extrapolated from a single example QA quoted. Measured:
+
+| Config | `once()`-wrapped | total context reads |
+|---|---|---|
+| config-gandaki | **0** | 12 |
+| config-lumbini | **0** | 35 |
+| config-nssd | **9** | 147 (**6%**) |
+
+**Zero, zero, and 6%.** `once()` is a minority spelling even in the config it was observed in.
+**Emitting it as "the house style" would be exactly the mistake `principle-config-agnostic.md`
+warns against** — hardcoding one project's habit and calling it the standard.
+**Rule: default to the bare reference. Never impose a wrapper; offer it, and only preselect one if
+this config's own forms overwhelmingly use it.**
+
+### ❌ NOT universal — must be detected, never assumed
+- **How context is built.** gandaki / lumbini / moh-nepal build it as an **object literal** — which
+  today's parser already reads. **NSSD is the outlier** (assignment + cross-file indirection). So the
+  tool is not blind everywhere; it is blind on one shape. Support both, privilege neither.
+- **The extras filename** — `contact-summary.extras.js` (gandaki, lumbini) vs
+  `contact-summary-extras.js` (nssd). Already a known finding; the same rule applies here.
+- **⚠️ A detection trap:** NSSD's extras contains an **unrelated local** `const context = {}` (`:352`)
+  inside a *different* function — the one whose keys are set dynamically at `:376`. A naive
+  `const context = {` match finds it and looks successful while missing `getContext` entirely. So
+  "found an object literal" is **not** proof you found the right one; anchor on the object that is
+  actually exported.
+
+### Why the multi-channel design is the project-agnostic answer
+Channel yields differ *wildly* per config — which is the argument for using all of them rather than
+picking a favourite:
+
+| Channel | gandaki | lumbini | moh-nepal | nssd |
+|---|---|---|---|---|
+| ① form calculations | 3 | **31** | 0 | **63** |
+| ② form eligibility | 3 | 5 | 0 | 7 |
+| ③ static assignment scan | 2 | 2 | 2 | **21** |
+
+No single channel wins everywhere; `moh-nepal` (a decommissioned config) yields nothing from either
+consumption channel. **Take the union, report per-key provenance, and let the config's own content
+decide what surfaces.** That is what makes this general rather than an NSSD feature.
+
 ## How we pre-know which context values are available — three channels, measured
 
 **The central finding, and it inverts the earlier draft of this spec: reading what the config
@@ -261,11 +324,11 @@ the dynamic families tier 1 can't name, and it validates the key end-to-end befo
 - Degrade honestly: no instance → tier-1 list with *"connect to an instance to see real values."*
 - Pick-a-contact needs a chooser; reuse whatever the deploy panel already uses to reach the instance.
 
-### Follow the config's own read idiom when inserting
-NSSD's forms read context as **`once(instance('contact-summary')/context/previous_bmi_ctx)`** -- the
-`once()` wrapper is this config's convention. `calcReference` already supports `read-once` as a
-wrapper option, so the insert should **detect what the config's existing forms do and match it**
-rather than defaulting to ours. Same principle as tier 3.
+### Wrapper choice — default bare, never impose *(corrected 2026-08-14)*
+`calcReference` supports `none` / `fallback-to-current` / `read-once`. **Default to the bare
+reference:** measured across three configs, `once()` accounts for 0%, 0% and 6% of context reads.
+Offer the wrappers, and preselect one only if this config's own forms overwhelmingly use it. See the
+project-agnostic check above — the earlier "match NSSD's `once()` house style" guidance was wrong.
 
 ## Tier 3 — emit in the project's house style
 
