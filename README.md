@@ -317,3 +317,12 @@ its workspace import.
 See [CLAUDE.md](CLAUDE.md) for the dev workflow, the round-trip invariant
 in detail, and the conventions enforced (zero-warnings lint, ESM
 everywhere, dependency-aware reorder validation).
+
+## Copyright
+
+Copyright 2026 Medic Mobile, Inc. <hello@medic.org>
+
+## License
+
+The software is provided under AGPL-3.0. Contributions to this project are
+accepted under the same license.
