@@ -13,28 +13,39 @@ files.
 
 ## Quick start
 
-Requires **Node ≥ 20** (CI runs 22) and **pnpm 11.2.2** — `corepack enable`
-picks up the pinned version from `packageManager` in `package.json`. This is a
-pnpm workspace and uses the `workspace:*` protocol; **npm and yarn cannot
-install it**.
+**Prerequisites** — Node ≥ 20 (CI runs 22) and pnpm 11.2.2. If you don't have
+pnpm, `corepack enable` installs the exact version pinned in `packageManager`.
+
+> This is a pnpm workspace using the `workspace:*` protocol, and the root
+> `package.json` has no `workspaces` field. **`npm install` and `yarn install`
+> cannot install it** — they will fail to resolve `@cht-ui/shared`. Use pnpm.
 
 ```sh
-pnpm install
-pnpm --filter @cht-ui/shared build   # required — client/server import its dist/
+pnpm install     # also builds `shared` — the client and server import its dist/
 pnpm dev
 ```
 
-The `shared` build is not optional: `shared` is consumed via its compiled
-`dist/`, which is gitignored, and no `postinstall` hook builds it for you. Skip
-it and the client fails to resolve `@cht-ui/shared`.
+Then open **http://localhost:5173**.
 
-This boots the two services you interact with, in parallel (plus a `tsc --watch`
-on `shared`, so edits to the parsers recompile as you go):
+`pnpm install` runs a `prepare` hook that builds the `shared` workspace, because
+`shared` is consumed through a compiled `dist/` that isn't checked in. If you
+ever need it by hand — after a `git pull` that changes the parsers, say —
+it's `pnpm --filter @cht-ui/shared build`.
 
-- Fastify API on http://localhost:5174 (`/api/...`)
-- Vite client on http://localhost:5173 (proxies `/api` to the server)
+`pnpm dev` starts three processes: the Vite client, the Fastify API, and a
+`tsc --watch` on `shared` so parser edits recompile as you type.
 
-Open http://localhost:5173. On the first screen you can either:
+| | URL | Notes |
+|---|---|---|
+| Client | **http://localhost:5173** | proxies `/api` to the server |
+| API | http://localhost:5174/api/… | Fastify |
+
+> **Use `localhost`, not `127.0.0.1`, for the client.** Vite binds to `[::1]`
+> (IPv6) only, so `http://127.0.0.1:5173` hangs while `http://localhost:5173`
+> works. The API is the opposite — it binds `127.0.0.1:5174`, which is why the
+> test suite and every internal fetch address it that way.
+
+On the first screen you can either:
 
 - Type the absolute path to an existing cht-conf project folder, or
 - Click **Browse…** to pick one with a folder browser, or
@@ -397,7 +408,7 @@ round-trip-safe, with a shared parser core**. Versions are what the manifests ac
 ## Commands
 
 ```sh
-pnpm install                            # Restore deps (pnpm only — see Quick start)
+pnpm install                            # Restore deps + build shared (pnpm only)
 pnpm dev                                # client + server + shared tsc --watch
 pnpm build                              # Build all workspaces
 pnpm typecheck                          # typecheck every workspace
@@ -417,8 +428,9 @@ pnpm --filter @cht-ui/client test:e2e
 pnpm --filter @cht-ui/client test:e2e:ui
 ```
 
-The Shared workspace must be built before client/server typecheck resolves
-its workspace import.
+The Shared workspace must be built before client/server typecheck resolves its
+workspace import. `pnpm install` does this for you via the `prepare` hook;
+rebuild by hand after pulling parser changes if the watcher isn't running.
 
 > **`pnpm lint` is currently red** — ~115 problems, almost all pre-existing
 > `no-undef` false positives from an eslint config that declares no browser

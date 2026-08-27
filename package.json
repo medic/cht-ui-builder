@@ -9,7 +9,8 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint . --max-warnings=0",
-    "format": "prettier --write \"**/*.{ts,tsx,json,md,yaml,yml}\""
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,yaml,yml}\"",
+    "prepare": "pnpm --filter @cht-ui/shared build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
