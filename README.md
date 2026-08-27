@@ -264,6 +264,59 @@ the next sprint's punch list.
   is in place; the GitHub Actions workflow + the checked-in fixture
   project are the next testability deliverable.
 
+## Tech stack
+
+Every pick below is a trade-off answer for a tool shaped like this one: **local, single-user,
+round-trip-safe, with a shared parser core**. Versions are what the manifests actually declare.
+
+### Foundation
+
+| Package | What it does | Considered instead | Why this one |
+|---|---|---|---|
+| **pnpm** `11.2.2` | Package manager + monorepo | npm workspaces, Yarn, Nx, Turborepo, Lerna | Needs to link `shared` into client+server via `workspace:*`. pnpm is fast and **strict** — no phantom dependencies, so you cannot import something you never declared. Nx/Turborepo are build-orchestration frameworks: overkill for three packages. npm workspaces are weaker on isolation. |
+| **TypeScript** `5.7` | Typed JS | plain JS, Flow, JSDoc types | The **data model is the contract** between all three workspaces — a form parsed in `shared` must type-match what the client renders and the server writes. Types catch drift at that boundary. Flow is effectively dead; plain JS gives no safety on the parser layer, which is exactly where the bugs are dangerous. |
+| **Node** `>=20` | Runtime | Deno, Bun | `cht-conf` and the whole CHT tooling ecosystem assume Node. Bun/Deno add compatibility risk for a tool whose job is to shell out to Node CLIs. Boring and compatible beats fast and novel here. |
+
+### Frontend
+
+| Package | What it does | Considered instead | Why this one |
+|---|---|---|---|
+| **React** `18.3` | UI components | Vue, Svelte, Solid, Angular, Preact | The editor is component- and state-heavy — React's sweet spot — and critically, **the two specialist libraries we need (dnd-kit, React Flow) are React-first**. Vue/Svelte would shrink the pool of ready-made libraries for exactly the hard UI bits. |
+| **Vite** `6.0` | Dev server + bundler | Create React App, Next.js, webpack, Parcel | Instant hot-reload, ESM-native, and a **one-line `/api` proxy** to Fastify. Next.js brings SSR/routing/server we don't need; CRA is deprecated and webpack-slow; raw webpack is config-heavy. |
+| **Zustand** `5.0` | Global state | Redux Toolkit, Context API, Jotai, Recoil, MobX | We need a **small** shared store (dirty / saving / view / project). Zustand does it in one file with almost no boilerplate. Redux is ceremony at this size; Context causes re-render pain and prop-less coupling; MobX's proxy magic is harder to reason about. |
+| **dnd-kit** `6.3` | Drag-and-drop reordering | react-beautiful-dnd, react-dnd, SortableJS, native HTML5 DnD | **Accessible and keyboard-operable out of the box** — reordering survey rows must work without a mouse — plus modern and maintained. react-beautiful-dnd is archived; react-dnd is lower-level; SortableJS is imperative and not React-idiomatic. |
+| **React Flow** `11.11` | Node/edge graph | D3, Cytoscape.js, vis-network, mermaid, dagre + custom SVG | The logic graph needs **pan, zoom, arrowed edges and controls for free**. React Flow gives all of that as React components. D3 means building interaction from scratch; mermaid renders static diagrams, not an interactive graph. |
+
+### Backend
+
+| Package | What it does | Considered instead | Why this one |
+|---|---|---|---|
+| **Fastify** `5.1` | HTTP API | Express, Koa, Hapi, NestJS, raw `http`, Hono | Small, fast, TypeScript-first, clean plugin model — right-sized for an API whose only job is file I/O. Express is older/slower and needs more middleware; NestJS is a heavy DI framework; raw `http` reinvents routing and parsing. |
+| **@fastify/cors** `10.0` | Dev cross-origin | `cors` middleware, hand-rolled headers | Official first-party plugin; lets the 5173 dev UI call the 5174 API. No reason to hand-roll. |
+| **@fastify/static** `8.0` | Serve the built UI | `serve-static`, a separate web server | Official plugin; in production the API can serve the bundled client from the same origin, so no proxy is needed. |
+| **tsx** `4.19` | Run the TS server in dev | ts-node, nodemon + ts-node, `node --loader`, compile-then-run | esbuild-based, fast, ESM-friendly, built-in `watch` — **no build step in the dev loop**. ts-node has ESM friction and is slower; compiling first slows every restart. |
+| **cht-conf** `6.5` | Validate + deploy the config | *(reimplement pyxform + deploy ourselves)* | **Not a choice among rivals — it is the canonical CHT tool.** The entire premise is that the folder stays deployable with cht-conf, so the app **runs the real thing** rather than reimplementing it. Reimplementing deploy was a deliberately rejected non-goal. |
+
+### The shared core
+
+| Package | What it does | Considered instead | Why this one |
+|---|---|---|---|
+| **ExcelJS** `4.4` | Read/write `.xlsx` | SheetJS (xlsx), node-xlsx, write-excel-file | Round-trip safety needs **cell-, column- and sheet-level control** to write back untouched columns verbatim. ExcelJS (MIT) gives that low-level buffer read/write. SheetJS splits features across a paid "pro" tier and has known write-fidelity gaps; node-xlsx is a thin wrapper with less control. |
+
+### Quality & tooling
+
+| Package | What it does | Considered instead | Why this one |
+|---|---|---|---|
+| **ESLint** `9.17` | Linting (zero-warnings gate) | Biome, oxlint, tslint | Mature, with first-class TypeScript + React plugin coverage. Biome/oxlint are faster but younger with narrower rule/plugin support — risky for a strict `--max-warnings=0` gate. |
+| **Prettier** `3.4` | Code formatting | Biome, dprint, `eslint --fix` | The de-facto standard; zero-config consistency. Fine to revisit alongside Biome later, but not worth the churn now. |
+| **Playwright** `1.49` | End-to-end browser tests | Cypress, Selenium, Puppeteer, WebdriverIO | Cross-browser, reliable auto-waiting, first-party from Microsoft, and it can drive a **real** browser against the running app. Cypress is single-tab and pushes a paid dashboard; Selenium is flaky/heavy; Puppeteer is Chrome-only and lower-level. |
+| **`node --test`** | Unit tests in `shared` | Jest, Vitest, Mocha, AVA | **Zero extra dependencies** — it runs straight over the compiled `dist/` output, which is exactly the round-trip artifact we want to test. Jest is heavy with ESM config pain; Vitest is excellent but would add a dependency for something Node now does natively. |
+
+> **One caveat on that last row, learned the hard way.** Testing the compiled artifact is necessary
+> but not sufficient: fixtures written in the shape the code already expects will pass while the
+> code corrupts real input. Round-trip tests must exercise the **serializer** over
+> **non-canonical** fixtures. See [Round-trip safety](#round-trip-safety).
+
 ## Project layout
 
 ```
