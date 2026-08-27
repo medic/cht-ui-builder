@@ -1,7 +1,13 @@
 <!--
 Work breakdown for the final tech design ("No Code CHT Configuration - Requirements & Design",
 2026-08-13). Follows that doc's own breakdown guidance: mark what the POC already did, keep
-tasks independently testable, tag dependencies. Status is measured against this repo. 2026-08-26.
+tasks independently testable, tag dependencies. Status is measured against this repo.
+
+Structure notes (2026-08-27):
+- F7 (user roles & attribution) added on PO direction; F8-F18 renumbered up by one.
+- Platform hardening is NO LONGER a feature. It is a defect list in the "Known defects"
+  appendix (D1-D10), because features are things you build and these are things you fix —
+  a completion percentage on a bug list is meaningless. Dependency tags point at D-numbers.
 -->
 
 # MVP feature & task breakdown
@@ -29,9 +35,10 @@ sign-off, and it says nothing about whether a CHW can use the result on a device
 reading TODO in that column has no automated coverage at all.
 
 > **The headline for planning: the POC already covers most of Phase 1, and all of what the design
-> doc calls Phase 2 "complex logic".** The remaining Phase 1 work concentrates in four places —
-> **preview, safety tests, versioning, and governance** — plus a platform-hardening feature the
-> design doc predates (F15). Read the summary table first; it changes the sequencing.
+> doc calls Phase 2 "complex logic".** The remaining Phase 1 work concentrates in five places —
+> **roles/attribution, preview, safety tests, versioning, and governance.** Separately, the
+> **Known defects** appendix lists ten real-config defects that gate two of the design doc's own
+> acceptance criteria. Read the summary table first; it changes the sequencing.
 
 ## Summary
 
@@ -39,19 +46,19 @@ reading TODO in that column has no automated coverage at all.
 |---|---|---|---|---|
 | F1 | Form editor — restricted safe edit subset | 1 | ATTEMPTED ~95% | Playwright attempted |
 | F2 | Beyond-the-sheet: properties, resources, translations | 1 | PART ~60% — resources/icons missing | Playwright attempted |
-| F3 | New simple linear form + persona assignment | 1 | PART ~70% — persona/roles missing | Playwright attempted |
+| F3 | New simple linear form + contact hydration | 1 | PART ~70% | Playwright attempted |
 | F4 | Basic hierarchy | 1 | ATTEMPTED ~90% | TODO |
 | F5 | Basic contacts | 1 | ATTEMPTED ~85% | TODO |
 | F6 | Basic task creation | 1 | PART ~75% — hand-off seam + lint emission | TODO |
-| F7 | Templates & reusable building blocks | 1 | PART ~55% — blocks not started | TODO |
-| F8 | Rendered WYSIWYG preview | 1 | TODO 0% | TODO |
-| F9 | Safety tests — synthetic patients | 1 | TODO ~10% | TODO |
-| F10 | Versioning: attributable & reversible | 1 | TODO ~15% | TODO |
-| F11 | Governance: sign-off + deploy gate | 1 | PART ~40% | TODO |
-| F12 | Contact summary (basic) | 1 | ATTEMPTED ~80% | Playwright attempted |
-| F13 | Standard codes | 1 | ATTEMPTED ~85% | TODO |
-| F14 | Round-trip & determinism (cross-cutting) | 1 | PART ~70% | TODO |
-| **F15** | **Platform hardening — real-config safety** | **1** | **PART ~15% — not in the design doc** | TODO |
+| **F7** | **User roles & attribution** | **1** | **TODO ~5% — new, prerequisite for F11 + F12** | TODO |
+| F8 | Templates & reusable building blocks | 1 | PART ~55% — blocks not started | TODO |
+| F9 | Rendered WYSIWYG preview | 1 | TODO 0% | TODO |
+| F10 | Safety tests — synthetic patients | 1 | TODO ~10% | TODO |
+| F11 | Versioning: attributable & reversible | 1 | TODO ~15% | TODO |
+| F12 | Governance: sign-off + deploy gate | 1 | PART ~40% | TODO |
+| F13 | Contact summary (basic) | 1 | ATTEMPTED ~80% | Playwright attempted |
+| F14 | Standard codes | 1 | ATTEMPTED ~85% | TODO |
+| F15 | Round-trip & determinism (cross-cutting) | 1 | PART ~70% | TODO |
 | F16 | Complex logic: calculation / relevant / constraint | 2 | ATTEMPTED ~90% **(ahead of plan)** | TODO |
 | F17 | AI-assisted authoring | 2 | TODO 0% | TODO |
 | F18 | Constrained drag-and-drop (BPMN-lite) | 2 | TODO ~5% | TODO |
@@ -76,7 +83,7 @@ reading TODO in that column has no automated coverage at all.
 | F1.12 | Plain-language column wrappers | ATTEMPTED | Playwright attempted | "Show this question when…", "Compute the value as…", "Accept only if…" |
 | F1.13 | Per-question image (`media::image`) | ATTEMPTED | Playwright attempted | Upload to the form-media folder, **verified against vendored cht-conf** |
 | F1.14 | Never expose XLSForm rows / XPath / JSON in Simple mode | PART | TODO | Largely true; **audit for leaks** — the generated-JS preview is always visible |
-| F1.15 | Edit variable names | OUT | — | Breaks longitudinal data. **Add an explicit guard** — see F15.6 |
+| F1.15 | Edit variable names | OUT | — | Breaks longitudinal data. **Add an explicit guard** [see D6] |
 
 **Independently testable:** every row is a UI action with an on-disk assertion. Existing e2e
 `geriatric-build.spec.ts` drives F1.1–F1.13 green.
@@ -95,18 +102,14 @@ reading TODO in that column has no automated coverage at all.
 | F2.8 | Keep sheet / properties / translations consistent | PART | TODO | Mostly; add a consistency check to preflight |
 | F2.9 | Media hygiene: delete route + orphan warning | TODO | TODO | Replaced images ship forever as attachments |
 
-## F3 — New simple linear form + persona assignment PART
+## F3 — New simple linear form + contact hydration PART
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
 | F3.1 | Create a new app form, label-first | ATTEMPTED | Playwright attempted | Human title → slugified id; `form_title` keeps the title |
 | F3.2 | Scaffold the canonical `inputs` plumbing | ATTEMPTED | Playwright attempted | user + contact + linking calculates |
-| F3.3 | **Declare `inputs/contact/name`** | TODO | TODO | **Deploy blocker.** 55 of 56 real app forms reference it; `validate-app-forms` fails the entire run without it |
+| F3.3 | Declare `inputs/contact/name` | TODO | TODO | 55 of 56 real app forms use it, and CHT provides it by default, so we should declare it. `validate-app-forms` fails the **entire run** without it |
 | F3.4 | Insert a contact-field reference (`patient_name`) | PART | TODO | Picker works but emits a dangling XPath [dep: F3.3] |
-| F3.5 | The four-question rapid-response case, end to end | PART | TODO | Buildable; blocked on F3.3 for any name reference |
-| F3.6 | **Assign a form to a persona / role** | TODO | TODO | **Nothing edits roles.** Needs `context.permission` or a user-based rule kind, plus a permissions surface |
-| F3.7 | Whole-form visibility per role | TODO | TODO | [dep: F3.6] |
-| F3.8 | Per-question role visibility | OUT | — | Out of MVP |
 
 ## F4 — Basic hierarchy ATTEMPTED
 
@@ -114,10 +117,10 @@ reading TODO in that column has no automated coverage at all.
 |---|---|---|---|---|
 | F4.1 | Guided "levels and roles" creator | ATTEMPTED | TODO | Quick Hierarchy Creator — pick depth, name each level |
 | F4.2 | Write `contact_types` + `place_hierarchy_types` | ATTEMPTED | TODO | Only those keys touched; the rest of `base_settings.json` untouched |
-| F4.3 | `place-types.json` maintenance | ATTEMPTED | TODO |  |
+| F4.3 | `place-types.json` maintenance | ATTEMPTED | TODO | |
 | F4.4 | Person types get `create_form` / `edit_form` | ATTEMPTED | TODO | Was a real bug; fixed |
 | F4.5 | Edit leaf-level contact details | ATTEMPTED | TODO | Via the contact forms |
-| F4.6 | Unrequested-semantic-change guard | TODO | TODO | Hierarchy save makes changes nobody asked for [dep: F15] |
+| F4.6 | Unrequested-semantic-change guard | TODO | TODO | Hierarchy save makes changes nobody asked for [see D9] |
 | F4.7 | Complex restructuring (split a district, add a level) | OUT | — | Out of MVP |
 
 ## F5 — Basic contacts ATTEMPTED
@@ -141,131 +144,144 @@ reading TODO in that column has no automated coverage at all.
 | F6.4 | Window: start / due / end in days | ATTEMPTED | TODO | Plus a date-anchor picker (report field, LMP) |
 | F6.5 | Resolution (`resolvedIf`) | ATTEMPTED | TODO | "form submitted in window" picker |
 | F6.6 | Action: open a form | ATTEMPTED | TODO | Dropdown of real forms |
-| F6.7 | Computed identity so re-runs never duplicate | ATTEMPTED | TODO | Task id derived **from the project's own convention** |
-| F6.8 | Bilingual task title | PART | TODO | Writes both `.properties` files; **key creation blocked** [dep: F2.5] |
-| F6.9 | **Task → form data hand-off** | TODO | TODO | Receivers land in `inputs/user/`; `modifyContent` emits `report.<f>` not `report.fields.<f>` |
-| F6.10 | **Emit in the project's lint style** | TODO | TODO | **Deploy blocker** — 16 ESLint errors, nothing ships [dep: F15.8] |
+| F6.7 | Computed identity so re-runs never duplicate | ATTEMPTED | TODO | Task id derived from the project's own convention |
+| F6.8 | Bilingual task title | PART | TODO | Writes both `.properties` files; key creation blocked [dep: F2.5] |
+| F6.9 | Task → form data hand-off | TODO | TODO | Receivers land in `inputs/user/`; `modifyContent` emits `report.<f>` not `report.fields.<f>` |
+| F6.10 | Emit in the project's lint style | TODO | TODO | **Deploy blocker** — 16 ESLint errors, nothing ships [see D8] |
 | F6.11 | Multi-visit temporal / group tasks | OUT | — | Out of MVP |
 
-## F7 — Templates & reusable building blocks PART
+## F7 — User roles & attribution TODO ← NEW
+
+**Not named as a feature in the design doc, but required by it three times:** *"every change is
+versioned, **attributable to a person/role**, and reversible"*; *"program staff self-serve to
+dev/training instances; **production passes a PR-style review gate**"*; and the open question
+*"**Which roles** should be allowed to add a new rapid-response form?"*
+
+**F11 (versioning) and F12 (governance) both depend on this.** You cannot attribute a change to a
+person if the tool has no concept of a person, and you cannot gate a panel by role if no roles
+exist. Both of those features are currently specced on top of nothing.
+
+> **Scope honestly: guardrails, not security.** The tool is local and single-user, and the config is
+> just files on the user's own disk — so this prevents *accidents* and produces an *audit trail*. It
+> does not stop anyone determined, and it should not claim to. Accidents are the real risk.
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
-| F7.1 | New-project templates | ATTEMPTED | TODO | empty / blank / cht-default / malaria |
-| F7.2 | Templates ship every cht-conf-required file | ATTEMPTED | TODO | Incl. the `targets.js` stub |
-| F7.3 | Per-template compile guard in CI | TODO | TODO | Would have caught cht-default's missing dependency |
-| F7.4 | Workflow templates (pregnancy, nutrition 6–59mo) | TODO | TODO | Clinical content, not plumbing |
-| F7.5 | **Reusable blocks** ("Age categories (select one)") | TODO | TODO | New concept — insertable, parameterised row groups |
-| F7.6 | Lineage / ancestor block | ATTEMPTED | TODO | Precedent for F7.5 — one gesture, balanced insert, staleness detection |
+| F7.1 | Identity on first run — name + role | TODO | TODO | Foundation for everything below; stored per project |
+| F7.2 | Stamp who + when into every change record | TODO | TODO | **This is what unblocks F11.3** [dep: F7.1] |
+| F7.3 | Role-gated panel visibility | TODO | TODO | Hide, or warn before opening — not a hard block [dep: F7.1] |
+| F7.4 | Deploy panel: dev/training self-serve vs production gated | TODO | TODO | The split the design doc states [dep: F7.1] |
+| F7.5 | Decide the role set | TODO | TODO | **Design-doc open question.** Program officer / designer / app developer / approver? |
+| F7.6 | Credentials already gate production *de facto* | ATTEMPTED | TODO | You can only deploy where you hold instance credentials — worth stating, since it may already cover most of the need |
+| F7.7 | Real multi-user authorization | OUT | — | Needs a hosted mode; out of MVP per the design doc |
 
-## F8 — Rendered WYSIWYG preview TODO
+**Note:** this is **builder-tool** roles — who may use which part of the editor. It is unrelated to
+assigning a *CHT form* to a persona (which is `permissions` in `app_settings` plus
+`context.permission`). That CHT-side work was removed from this breakdown; if the acceptance
+criterion *"an MOH team can add a rapid-response form and assign it to a persona"* is still wanted,
+it needs its own feature.
 
-| ID | Task | Dev State | QA State | Notes |
-|---|---|---|---|---|
-| F8.1 | Spike: how much of the Project Explorer renderer is reusable | TODO | TODO | **A design-doc open question.** Do this first |
-| F8.2 | Render the current form as the CHW sees it | TODO | TODO | [dep: F8.1] |
-| F8.3 | On-demand xls→xml for preview | TODO | TODO | Or reuse the converted `.xml` |
-| F8.4 | Click a question in preview → open its editor | TODO | TODO | The minimum that makes it an *editing* surface [dep: F8.2] |
-| F8.5 | Storybook-style flow walkthrough | TODO | TODO | [dep: F8.2] |
-| F8.6 | Full inline editing in the preview | TODO | TODO | Stretch [dep: F8.4] |
-
-## F9 — Safety tests: synthetic patients TODO
+## F8 — Templates & reusable building blocks PART
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
-| F9.1 | Define the synthetic-patient case format | TODO | TODO | Foundation |
-| F9.2 | Run a case through old + new form, diff outcomes | TODO | TODO | The core acceptance criterion [dep: F9.1] |
-| F9.3 | "No clinical change" gate on an edit | TODO | TODO | [dep: F9.2] |
-| F9.4 | Accumulate cases per revision | TODO | TODO | Behaviour changes only when clinical rules change |
-| F9.5 | Workflow simulator (contact + reports → what fires) | TODO | TODO | Externally requested; a leapfrog vs CommCare/Kobo |
-| F9.6 | Preflight validator (deploy-blocking checks) | ATTEMPTED | TODO | Required files, identifiers, XPath hops, choices, dangling refs |
-| F9.7 | `validate-app-forms` / pyxform leg in CI | TODO | TODO | The **only** check that catches a dangling XPath [dep: F15] |
+| F8.1 | New-project templates | ATTEMPTED | TODO | empty / blank / cht-default / malaria |
+| F8.2 | Templates ship every cht-conf-required file | ATTEMPTED | TODO | Incl. the `targets.js` stub |
+| F8.3 | Per-template compile guard in CI | TODO | TODO | Would have caught cht-default's missing dependency |
+| F8.4 | Workflow templates (pregnancy, nutrition 6–59mo) | TODO | TODO | Clinical content, not plumbing |
+| F8.5 | Reusable blocks ("Age categories (select one)") | TODO | TODO | New concept — insertable, parameterised row groups |
+| F8.6 | Lineage / ancestor block | ATTEMPTED | TODO | Precedent for F8.5 — one gesture, balanced insert, staleness detection |
 
-## F10 — Versioning: attributable & reversible TODO
+## F9 — Rendered WYSIWYG preview TODO
+
+| ID | Task | Dev State | QA State | Notes |
+|---|---|---|---|---|
+| F9.1 | Spike: how much of the Project Explorer renderer is reusable | TODO | TODO | **A design-doc open question.** Do this first |
+| F9.2 | Render the current form as the CHW sees it | TODO | TODO | [dep: F9.1] |
+| F9.3 | On-demand xls→xml for preview | TODO | TODO | Or reuse the converted `.xml` |
+| F9.4 | Click a question in preview → open its editor | TODO | TODO | The minimum that makes it an *editing* surface [dep: F9.2] |
+| F9.5 | Storybook-style flow walkthrough | TODO | TODO | [dep: F9.2] |
+| F9.6 | Full inline editing in the preview | TODO | TODO | Stretch [dep: F9.4] |
+
+## F10 — Safety tests: synthetic patients TODO
+
+| ID | Task | Dev State | QA State | Notes |
+|---|---|---|---|---|
+| F10.1 | Define the synthetic-patient case format | TODO | TODO | Foundation |
+| F10.2 | Run a case through old + new form, diff outcomes | TODO | TODO | The core acceptance criterion [dep: F10.1] |
+| F10.3 | "No clinical change" gate on an edit | TODO | TODO | [dep: F10.2] |
+| F10.4 | Accumulate cases per revision | TODO | TODO | Behaviour changes only when clinical rules change |
+| F10.5 | Workflow simulator (contact + reports → what fires) | TODO | TODO | Externally requested; a leapfrog vs CommCare/Kobo |
+| F10.6 | Preflight validator (deploy-blocking checks) | ATTEMPTED | TODO | Required files, identifiers, XPath hops, choices, dangling refs |
+| F10.7 | `validate-app-forms` / pyxform leg in CI | TODO | TODO | The **only** check that catches a dangling XPath [see D-list] |
+
+## F11 — Versioning: attributable & reversible TODO
 
 The design doc flags this as *"TBD — tall order"* and *"might be very hard, needs changes with the
-CHT ecosystem itself."* Treat as a spike first.
+CHT ecosystem itself."* Treat as a spike first. **Depends on F7.**
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
-| F10.1 | Spike: git vs hash-and-comment | TODO | TODO | The doc offers both; decide before building |
-| F10.2 | Undo / redo within a session | ATTEMPTED | TODO | Single-patch undo across the editor |
-| F10.3 | Record who + when per change | TODO | TODO | No identity concept exists yet |
-| F10.4 | Roll back a change in-app | TODO | TODO | git substrate exists; no UI [dep: F10.1] |
-| F10.5 | Diff view of pending changes | PART | TODO | Changed-form detection only; no content diff |
-| F10.6 | Version stamp in the artifact | PART | TODO | `settings.version` stamped on create |
+| F11.1 | Spike: git vs hash-and-comment | TODO | TODO | The doc offers both; decide before building |
+| F11.2 | Undo / redo within a session | ATTEMPTED | TODO | Single-patch undo across the editor |
+| F11.3 | Record who + when per change | TODO | TODO | Blocked until identity exists [dep: F7.2] |
+| F11.4 | Roll back a change in-app | TODO | TODO | git substrate exists; no UI [dep: F11.1] |
+| F11.5 | Diff view of pending changes | PART | TODO | Changed-form detection only; no content diff |
+| F11.6 | Version stamp in the artifact | PART | TODO | `settings.version` stamped on create |
 
-## F11 — Governance: sign-off + deploy gate PART
+## F12 — Governance: sign-off + deploy gate PART
 
-| ID | Task | Dev State | QA State | Notes |
-|---|---|---|---|---|
-| F11.1 | Decisions / sign-off view | PART | TODO | Exists but FHIR-oriented; needs to cover form + task changes |
-| F11.2 | Self-serve deploy to dev / training | ATTEMPTED | TODO | One-click, targeted, friendly error translator |
-| F11.3 | Production review gate | TODO | TODO | **Open question in the doc:** who reviews, what is the minimum gate |
-| F11.4 | Governance tiering by change type | TODO | TODO | Label edit vs mandatory toggle vs new form |
-| F11.5 | Gate the mandatory↔optional toggle specifically | TODO | TODO | The doc calls this out by name [dep: F9.3] |
-| F11.6 | Fix the sign-off view rendering conditions inverted | TODO | TODO | Currently shows the **opposite** of the config's meaning [dep: F15] |
-
-## F12 — Contact summary (basic) ATTEMPTED
+**Depends on F7** for anything role-based.
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
-| F12.1 | Context flags: add / rename / remove | ATTEMPTED | TODO | Only the context object rewritten; fields/cards verbatim |
-| F12.2 | Condition-card fields editor | ATTEMPTED | TODO | Cards + fields, raw fallback for imperative cards |
-| F12.3 | Cross-form values ("latest X from form Y") | ATTEMPTED | Playwright attempted | Self-contained reports scan |
-| F12.4 | **Pick values the config already computes** | PART | TODO | **In flight.** Shows 0 of ~70 on a real config |
-| F12.5 | Helper-body editing | TODO | TODO | **Do not use today** — 31 of 31 real helpers fail to survive it [dep: F15] |
+| F12.1 | Decisions / sign-off view | PART | TODO | Exists but FHIR-oriented; needs to cover form + task changes |
+| F12.2 | Self-serve deploy to dev / training | ATTEMPTED | TODO | One-click, targeted, friendly error translator |
+| F12.3 | Production review gate | TODO | TODO | **Open question in the doc:** who reviews, what is the minimum gate [dep: F7.4] |
+| F12.4 | Governance tiering by change type | TODO | TODO | Label edit vs mandatory toggle vs new form |
+| F12.5 | Gate the mandatory↔optional toggle specifically | TODO | TODO | The doc calls this out by name [dep: F10.3] |
+| F12.6 | Fix the sign-off view rendering conditions inverted | TODO | TODO | Currently shows the opposite of the config's meaning [see D10] |
 
-## F13 — Standard codes ATTEMPTED
-
-| ID | Task | Dev State | QA State | Notes |
-|---|---|---|---|---|
-| F13.1 | Assign codes to questions and choices | ATTEMPTED | TODO | Sidecar `fhir-mapping.json` |
-| F13.2 | LOINC / ICD / CIEL dictionaries | ATTEMPTED | TODO | Vendored, free-licence only |
-| F13.3 | Coverage + orphan reporting | ATTEMPTED | TODO |  |
-| F13.4 | SNOMED | OUT | — | Deliberate — licensing |
-| F13.5 | WHO CCC | TODO | TODO | Named in the design doc, not built |
-
-## F14 — Round-trip & determinism (cross-cutting) PART
+## F13 — Contact summary (basic) ATTEMPTED
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
-| F14.1 | Preserve unknown columns and sheets verbatim | ATTEMPTED | TODO | The core invariant; extras rewritten in their original position |
-| F14.2 | Hand-authored form round-trips losslessly | PART | TODO | True for the sheet; **the JS surfaces are where it breaks** [dep: F15] |
-| F14.3 | Deterministic output: same edit, same bytes | PART | TODO | Holds for forms; formatting drift on JS |
-| F14.4 | Reuse pyxform + cht-conf, no parallel compiler | ATTEMPTED | TODO | Explicit non-goal honoured |
-| F14.5 | Hostile / non-canonical fixture corpus | PART | TODO | 8 hostile test files + a corpus sweep exist — **still uncommitted** |
-| F14.6 | Cross-sheet logic must live in `shared/` as pure functions | TODO | TODO | Standing rule after four green-tests / broken-reality cases |
+| F13.1 | Context flags: add / rename / remove | ATTEMPTED | TODO | Only the context object rewritten; fields/cards verbatim |
+| F13.2 | Condition-card fields editor | ATTEMPTED | TODO | Cards + fields, raw fallback for imperative cards |
+| F13.3 | Cross-form values ("latest X from form Y") | ATTEMPTED | Playwright attempted | Self-contained reports scan |
+| F13.4 | Pick values the config already computes | PART | TODO | **In flight.** Shows 0 of ~70 on a real config |
+| F13.5 | Helper-body editing | TODO | TODO | **Do not use today** — 31 of 31 real helpers fail to survive it [see D3] |
 
-## F15 — Platform hardening: real-config safety PART — NOT IN THE DESIGN DOC
-
-The design doc predates pointing the editor at a **deployed national config**. Nine defects
-silently corrupt it; six fire on **open-a-panel-and-save with zero edits**, and every one produces
-valid, compiling, deployable output. **This gates the doc's own "round-trips without losing them"
-and "deterministic output" acceptance criteria**, so it belongs in Phase 1.
+## F14 — Standard codes ATTEMPTED
 
 | ID | Task | Dev State | QA State | Notes |
 |---|---|---|---|---|
-| F15.1 | Read formula results, not formula source | TODO | TODO | One expression; kills three findings (19 of 34 contact forms) |
-| F15.2 | Do not invent the helper argument | ATTEMPTED | TODO | Shipped |
-| F15.3 | Refuse to emit what cannot be represented | TODO | TODO | Dropped declarations cause a ReferenceError per contact |
-| F15.4 | `resolvedIf`: exact match, not substring | TODO | TODO | Replaces hand-written bodies; drops the start clamp |
-| F15.5 | Preserve parentheses in eligibility | TODO | TODO | 11 of 24 forms flip eligibility, every flip false→true |
-| F15.6 | Scope helper / export replaces; rename covers all refs | TODO | TODO | 37 missed references |
-| F15.7 | Translations: write the last duplicate, not the first | TODO | TODO | Duplicate keys exist in all four real configs |
-| F15.8 | Emit in the project's lint style | TODO | TODO | **Deploy blocker** — same as F6.10 |
-| F15.9 | Config-agnostic acceptance rule | ATTEMPTED | TODO | A fix must be right in all four real configs |
+| F14.1 | Assign codes to questions and choices | ATTEMPTED | TODO | Sidecar `fhir-mapping.json` |
+| F14.2 | LOINC / ICD / CIEL dictionaries | ATTEMPTED | TODO | Vendored, free-licence only |
+| F14.3 | Coverage + orphan reporting | ATTEMPTED | TODO | |
+| F14.4 | SNOMED | OUT | — | Deliberate — licensing |
+| F14.5 | WHO CCC | TODO | TODO | Named in the design doc, not built |
+
+## F15 — Round-trip & determinism (cross-cutting) PART
+
+| ID | Task | Dev State | QA State | Notes |
+|---|---|---|---|---|
+| F15.1 | Preserve unknown columns and sheets verbatim | ATTEMPTED | TODO | The core invariant; extras rewritten in their original position |
+| F15.2 | Hand-authored form round-trips losslessly | PART | TODO | True for the sheet; the JS surfaces are where it breaks [see D-list] |
+| F15.3 | Deterministic output: same edit, same bytes | PART | TODO | Holds for forms; formatting drift on JS [see D8] |
+| F15.4 | Reuse pyxform + cht-conf, no parallel compiler | ATTEMPTED | TODO | Explicit non-goal honoured |
+| F15.5 | Hostile / non-canonical fixture corpus | PART | TODO | 8 hostile test files + a corpus sweep exist — still uncommitted |
+| F15.6 | Cross-sheet logic must live in `shared/` as pure functions | TODO | TODO | Standing rule after four green-tests / broken-reality cases |
 
 ---
 
 ## Phase 2
 
 **F16 — Complex logic (calculation / relevant / constraint) ATTEMPTED ~90%, ahead of the plan.**
-The design doc places this in Phase 2; the POC shipped it. Visual builders for relevant,
-constraint, choice_filter and calculation, with plain-language wrappers, if-then decision tables,
-cross-form references, and a raw escape that preserves unparsed text. Remaining: nested grouping
-beyond one level (**decided: keep as is**) and wiring choice dropdowns into the last un-wired
-builder mount.
+The design doc places this in Phase 2; the POC shipped it. Visual builders for relevant, constraint,
+choice_filter and calculation, with plain-language wrappers, if-then decision tables, cross-form
+references, and a raw escape that preserves unparsed text. Remaining: nested grouping beyond one
+level (**decided: keep as is**) and wiring choice dropdowns into the last un-wired builder mount.
 
 **F17 — AI-assisted authoring TODO.** F17.1 evaluate `cht-ai-tools` for overlap · F17.2 get familiar
 with Berkeley's tool · F17.3 draft-from-guidelines producing an ordinary editable form · F17.4 gap
@@ -273,8 +289,8 @@ and consistency flagging · F17.5 the IR crosswalk (a layered clinical IR compil
 XLSForm IR — groundwork exists in `ir-crosswalk-levine.md`) · F17.6 a free / open-model path, which
 the doc names as necessary for real adoption.
 
-**F18 — Constrained drag-and-drop (BPMN-lite) TODO ~5%.** React Flow already renders a form flowchart
-view, which is the seed. Structured data stays the source of truth, never the diagram.
+**F18 — Constrained drag-and-drop (BPMN-lite) TODO ~5%.** React Flow already renders a form
+flowchart view, which is the seed. Structured data stays the source of truth, never the diagram.
 **Open question in the doc: which Phase-2 track goes first.**
 
 ---
@@ -283,25 +299,65 @@ view, which is the seed. Structured data stays the source of truth, never the di
 
 | Design-doc criterion | Features | Can we claim it today? |
 |---|---|---|
-| Change a label / choice / image / mandatory flag and deploy without a developer | F1, F2, F11.2 | **Nearly** — blocked by F6.10 lint emission on any task edit |
-| Small change: full dev cycle → days | F1, F11.2 | Plausible; unmeasured |
-| MOH team adds a rapid-response form and assigns a persona | F3 | **No** — F3.6 roles missing |
+| Change a label / choice / image / mandatory flag and deploy without a developer | F1, F2, F12.2 | **Nearly** — blocked by F6.10 lint emission on any task edit |
+| Small change: full dev cycle → days | F1, F12.2 | Plausible; unmeasured |
 | Basic hierarchy, contacts and a single-person task via the builder | F4, F5, F6 | **Yes**, proven on a real config |
-| Every change versioned, attributable, reversible | F10 | **No** |
-| Edits that should not change logic give identical synthetic outcomes | F9 | **No** |
+| Every change versioned, attributable, reversible | F7, F11 | **No** — and F11 cannot start until F7 exists |
+| Edits that should not change logic give identical synthetic outcomes | F10 | **No** |
 | Icons / logos + translations edited outside the XLS, kept consistent | F2 | **Partly** — icons missing |
-| Hand-authored columns round-trip without loss | F14, F15 | **Sheet yes, JS no** |
-| Production passes a review gate; dev / training self-serve | F11 | **Half** |
+| Hand-authored columns round-trip without loss | F15, D-list | **Sheet yes, JS no** |
+| Production passes a review gate; dev / training self-serve | F7, F12 | **Half** — the credential split works, the role gate does not exist |
 | Complete an edit in Simple mode without seeing XLSForm, JSON or variable names | F1.14 | **Nearly** — audit for leaks |
+
+---
+
+## Appendix — Known defects (from real-config testing)
+
+**Why these are here and not a feature.** Features are things you build; these are things you fix,
+and a completion percentage on a bug list means nothing. They are listed because **they gate two of
+the design doc's own acceptance criteria** — *"a form with hand-authored columns round-trips through
+the builder without losing them"* and *"regenerated artifacts must be deterministic"* — both of
+which are false today for the JavaScript surfaces.
+
+**Where they came from.** Every earlier probe ran against configs we scaffolded ourselves. Pointing
+the editor at a **deployed national config** surfaced shapes we had never fixtured. Nine of these
+fire on **open-a-panel-and-save with zero user edits**, and every one produces valid, compiling,
+deployable output — which is why preflight, the validators, `compile-app-settings` and the test
+suite all pass on the corrupted result.
+
+Full evidence and reproduction steps: `docs/handoff-nssd-safety-batch-2026-08-11.md` (canonical
+A-numbering), `docs/reviews/nssd-initial-assessment-2026-08-11.md` (technical),
+`docs/reviews/nssd-detailed-assessment-2026-08-11.md` (plain language).
+
+| ID | Defect | State | What breaks |
+|---|---|---|---|
+| D1 | Reads a formula's **source** instead of its **result** | TODO | `=FALSE()` becomes the text `"FALSE()"`, an undefined XPath function — 19 of 34 contact forms. Same bug turns `=NOW()` into a JS date string in 10 app forms |
+| D2 | Invents the helper argument | ATTEMPTED | Rewrote `isAlive(contact)` to `isAlive(contact.contact)`, making the check always-true — 25 of 29 tasks would fire for dead and muted patients. **Fixed** |
+| D3 | Emits a body it only partly parsed | TODO | Keeps logic, drops the `const` declarations it references → `ReferenceError` per contact. Also the reason helper-body editing is unusable (F13.5) |
+| D4 | `resolvedIf` matched by substring, not exactly | TODO | Overwrites hand-written code with a template that omits a clamp, so a stale older report marks the task done and **the CHW never sees it** — 7 tasks |
+| D5 | Drops parentheses in eligibility | TODO | `A && (B \|\| C)` becomes `A && B \|\| C`. **11 of 24 forms flip, every flip false→true** — deceased and muted contacts become eligible |
+| D6 | Unscoped find-and-replace; rename misses references | TODO | Corrupts a call site instead of the definition (30 of 37 helpers); a dangling `module.exports` name throws at load → **every profile blank, forms vanish from devices**. Rename leaves 37 `${}` refs dangling → pyxform hard-fails the whole config |
+| D7 | Writes the **first** duplicate translation key | TODO | CHT reads the **last**. 113 real duplicates: the edit is invisible in the app *and* destroys the line actually in use |
+| D8 | Emits its own formatting, not the project's | TODO | The project's own ESLint rejected `tasks.js` with 16 errors — **nothing deploys at all** until a human reformats [blocks F6.10] |
+| D9 | Hierarchy save makes unrequested semantic changes | TODO | Injects `create_form` into staff types that deliberately omit it; re-derives `place_hierarchy_types` on any keystroke [blocks F4.6] |
+| D10 | Sign-off view renders conditions inverted | TODO | The Decisions screen shows the **opposite** of the config's meaning — on the surface meant for approval [blocks F12.6] |
+
+**The acceptance test for every fix: is this also correct in the other three real configs?** They
+disagree with each other on nearly every convention — `isAlive(contact.contact)` is used by 1 of 4;
+two use `isAlive(contact)`; both are valid CHT. So "emit the other one" is not a fix, it is a
+different hardcode. Principle: **preserve what you read, derive what you write, refuse what you
+cannot model.**
+
+---
 
 ## Suggested sequencing
 
-1. **F15 + F3.3 + F6.10** — stop corrupting real configs and unblock deploy. Everything else is
-   worth less until the output can actually ship.
-2. **F2.5 + F12.4 + F3.4** — finish the in-flight authoring work (the current focus).
-3. **F3.6** — roles / persona. The smallest remaining item that unblocks a stated acceptance criterion.
-4. **F2.6 / F2.7** — icons + resources. Named in scope, currently zero coverage.
-5. **F8 spike, then F9** — preview first (F8.1 answers a design-doc open question), because the
+1. **F2.5 + F13.4** — finish the in-flight authoring work (the current focus).
+2. **D8 + D1** — the two cheapest defects with the widest blast radius. D8 unblocks deploying
+   anything the tool writes; D1 is one expression and fixes three findings.
+3. **F2.6 / F2.7** — icons + resources. Named in scope, currently zero coverage.
+4. **F7** — roles and attribution. Small, and **F11 and F12 cannot start without it.**
+5. **F9 spike, then F10** — preview first (F9.1 answers a design-doc open question), because the
    synthetic-patient harness reuses the same rendering and evaluation work.
-6. **F10 + F11** — versioning and governance. Both carry open questions the doc flags; spike first.
-7. **F7.4 / F7.5**, then Phase 2 once the squad picks a track.
+6. **F11 + F12** — versioning and governance. Both carry open questions the doc flags; spike first.
+7. **F8.4 / F8.5**, then Phase 2 once the squad picks a track.
