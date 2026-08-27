@@ -1,11 +1,19 @@
 /**
- * Shared geriatric-use-case content + builder-driver helpers.
+ * Shared elder-care demo content + builder-driver helpers.
  *
- * Single source of truth for the Integrated Health Assessment sheet content
- * (labels transcribed from the customer's workbook) and the proven Playwright
- * drivers for the no-code builder, used by:
- *   - geriatric-iha-demo.spec.ts      (at-scale form build + demo recording)
- *   - geriatric-workflow-e2e.spec.ts  (full task-lifecycle probe)
+ * ⚠️  SYNTHETIC DEMO CONTENT — NOT CLINICAL GUIDANCE.
+ * The questions, thresholds and advice below are invented for the purpose of
+ * exercising the builder. They are deliberately shaped like a real community
+ * health assessment (sections, pass/fail screens, referral flags, a follow-up
+ * form) because that is what makes them a useful test of the tool — but they
+ * are not a validated instrument and must never be deployed to real users or
+ * treated as medical advice. The Nepali strings are illustrative, chosen to
+ * exercise a second locale and a non-Latin script; they have not been reviewed
+ * by a translator.
+ *
+ * This is the single source of truth for the demo assessment content and the
+ * Playwright drivers for the no-code builder. Identifiers (field names, list
+ * names, choice values, refer_* flags) are stable — specs assert on them.
  *
  * Everything here observes the QA safety rule: pure UI driving, no production
  * code, no Contact Summary → Helpers → "edit body".
@@ -51,43 +59,43 @@ export const PASS_FAIL: NewList = {
   ],
 };
 
-/** The 10 assessment sections (IHA sheet R4–R51). `oneScreen` may be forced
- *  by callers that need compact Enketo pagination for runtime driving. */
+/** The 10 demo assessment sections. `oneScreen` may be forced by callers that
+ *  need compact Enketo pagination for runtime driving. */
 export function ihaSections(oneScreen: boolean): Section[] {
   return SECTIONS_BASE.map((s) => ({ ...s, oneScreen }));
 }
 
 const SECTIONS_BASE: Section[] = [
   {
-    en: 'Cognitive decline', ne: 'संज्ञानात्मक ह्रास / स्मरणशक्ति र अभिमुखीकरण', slug: 'cognitive_decline',
+    en: 'Memory and orientation', ne: 'सम्झना र अभिमुखीकरण', slug: 'cognitive_decline',
     rows: [
       { name: 'memory_trouble', tile: T.s1, required: true, list: PASS_FAIL,
-        en: 'Do you have trouble remembering things? For example, do you sometimes forget where you currently are, or what day of the week it is today?',
-        ne: 'के तपाईंलाई सम्झने कुरामा समस्या छ? जस्तै: तपाईं अहिले कहाँ हुनुहुन्छ वा आज कुन बार हो भन्ने कहिलेकाहीँ बिर्सिनुहुन्छ?' },
+        en: 'Do they find it harder than before to remember recent events?',
+        ne: 'के उहाँलाई पहिलेभन्दा हालका कुरा सम्झन गाह्रो हुन्छ?' },
       { name: 'memory_test_note', tile: T.note,
-        en: 'Conduct a simple memory test;', ne: 'सरल स्मृति परीक्षण गर्नुहोस् ;',
+        en: 'Do a short memory check.', ne: 'छोटो सम्झना जाँच गर्नुहोस्।',
         rel: { rules: [{ kind: 'cmp', field: 'memory_trouble', choice: 'yes_fail' }] } },
       { name: 'memorize_words_note', tile: T.note,
-        en: 'Have them memorize 3 simple words, for example: Rice, Ranimahal, Fewa Lake.',
-        ne: '३ वटा सरल शब्द याद गराउनुहोस् जस्तै: चामल, रानीमहल, फेवाताल।',
+        en: 'Say three simple words and ask them to remember: lamp, river, basket.',
+        ne: 'तीन सजिला शब्द भन्नुहोस् र सम्झन लगाउनुहोस्: बत्ती, खोला, टोकरी।',
         rel: { rules: [{ kind: 'cmp', field: 'memory_trouble', choice: 'yes_fail' }] } },
       { name: 'word_recall', tile: T.s1, required: true,
-        en: 'Now have them repeat these 3 words.', ne: 'अब यी ३ वटा शब्द लाई दोहोर्‍याउन लगाउनुहोस्।',
+        en: 'Ask them to repeat the three words.', ne: 'ती तीन शब्द दोहोर्‍याउन लगाउनुहोस्।',
         list: { list: 'word_recall_result', choices: [
-          { name: 'recall_pass', en: 'Able to repeat all three words (Pass)', ne: 'तीनै शब्द दोहोर्‍याए (पास)' },
-          { name: 'recall_fail', en: 'Unable to repeat all three words (Fail)', ne: 'तीनै शब्द दोहोर्‍याउन असमर्थ (फेल)' },
+          { name: 'recall_pass', en: 'Repeated all three (Pass)', ne: 'तीनै दोहोर्‍याए (पास)' },
+          { name: 'recall_fail', en: 'Could not repeat all three (Fail)', ne: 'तीनै दोहोर्‍याउन सकेनन् (फेल)' },
         ] },
         rel: { rules: [{ kind: 'cmp', field: 'memory_trouble', choice: 'yes_fail' }] } },
       { name: 'date_place', tile: T.s1, required: true,
-        en: "What is today's full date, and where are you right now?", ne: 'आजको पूरा मिति र अहिले तपाईं कहाँ हुनुहुन्छ ?',
+        en: 'Ask what day it is and where they are right now.', ne: 'आज कुन बार हो र अहिले कहाँ हुनुहुन्छ सोध्नुहोस्।',
         list: { list: 'orientation_result', choices: [
-          { name: 'orient_pass', en: 'Both correct (Pass)', ne: 'दुवै सहि (पास)' },
-          { name: 'orient_fail', en: 'Unable to state both correctly (Fail)', ne: 'दुवै कुरा भन्न असमर्थ (फेल)' },
+          { name: 'orient_pass', en: 'Both answers correct (Pass)', ne: 'दुवै उत्तर सही (पास)' },
+          { name: 'orient_fail', en: 'One or both incorrect (Fail)', ne: 'एक वा दुवै गलत (फेल)' },
         ] },
         rel: { rules: [{ kind: 'cmp', field: 'memory_trouble', choice: 'yes_fail' }] } },
       { name: 'cognitive_refer_note', tile: T.note,
-        en: 'Refer them to an appropriate health facility for further examination.',
-        ne: 'उहाँलाई थप जाँचको लागि उपयुक्त स्वास्थ्य संस्थामा प्रेषण गर्नुहोस्।',
+        en: 'Suggest a check-up at the nearest health post.',
+        ne: 'नजिकको स्वास्थ्य चौकीमा जाँच गराउन सुझाव दिनुहोस्।',
         rel: { or: true, rules: [
           { kind: 'cmp', field: 'word_recall', choice: 'recall_fail' },
           { kind: 'cmp', field: 'date_place', choice: 'orient_fail' },
@@ -95,55 +103,54 @@ const SECTIONS_BASE: Section[] = [
     ],
   },
   {
-    en: 'Limited mobility', ne: 'सीमित गतिशीलता / चलायमान क्षमता', slug: 'limited_mobility',
+    en: 'Moving around', ne: 'हिँडडुल र चलायमान', slug: 'limited_mobility',
     rows: [
       { name: 'chair_rise_note', tile: T.note,
-        en: 'Conduct the chair-rise test;', ne: 'कुर्सीबाट उठ्ने परीक्षण गर्नुहोस् ;' },
+        en: 'Do the sit-to-stand check.', ne: 'उठ्ने-बस्ने जाँच गर्नुहोस्।' },
       { name: 'safe_to_test', tile: T.s1, required: true,
-        en: 'Without using your hands, do you feel safe standing up and sitting down quickly 5 times?',
-        ne: 'हात नचलाई, छिटोछिटो ५ पटक उठेर बस्न तपाईंलाई सुरक्षित लाग्छ?',
+        en: 'Do they feel steady enough to stand up and sit down five times without using their hands?',
+        ne: 'हात नटेकी पाँच पटक उठ्न-बस्न सकिन्छ जस्तो लाग्छ?',
         list: { list: 'chair_test_choice', choices: [
-          { name: 'will_test', en: 'Yes (Test)', ne: 'लाग्छ (परीक्षण गर्ने)' },
-          { name: 'wont_test', en: 'No (Do not test)', ne: 'लाग्दैन (परीक्षण नगर्ने)' },
+          { name: 'will_test', en: 'Yes (Do the check)', ne: 'लाग्छ (जाँच गर्ने)' },
+          { name: 'wont_test', en: 'No (Skip the check)', ne: 'लाग्दैन (जाँच नगर्ने)' },
         ] } },
       { name: 'timer_note', tile: T.note,
-        en: 'Before starting the activity, have a watch/phone ready. You need to record how long this activity takes.',
-        ne: 'क्रियाकलाप सुरु गर्नुअगाडि घडी / फोन तयार राख्नुहोस्। यो क्रियाकलाप गर्न कति समय लाग्छ रेकर्ड गर्नुपर्छ।' },
+        en: 'Have a watch or phone ready to time the activity.',
+        ne: 'समय नाप्न घडी वा फोन तयार राख्नुहोस्।' },
       { name: 'sit_stand_time', tile: T.s1, required: true,
-        en: 'How many seconds did it take to complete standing up and sitting down quickly 5 times?',
-        ne: '५ पटक छिटो-छिटो उठेर बस्न पूरा हुन कति सेकेण्ड लाग्यो?',
+        en: 'How long did the five repetitions take?', ne: 'पाँच पटक पूरा गर्न कति समय लाग्यो?',
         list: { list: 'sit_stand_result', choices: [
-          { name: 'fourteen_or_less', en: '14 seconds or less (Pass)', ne: '१४ सेकेन्ड वा सो भन्दा कम (पास)' },
-          { name: 'over_fourteen', en: 'More than 14 seconds (Fail)', ne: '१४ सेकेन्ड भन्दा बढी (फेल)' },
+          { name: 'fourteen_or_less', en: '14 seconds or less (Pass)', ne: '१४ सेकेन्ड वा कम (पास)' },
+          { name: 'over_fourteen', en: 'More than 14 seconds (Fail)', ne: '१४ सेकेन्डभन्दा बढी (फेल)' },
         ] },
         rel: { rules: [{ kind: 'cmp', field: 'safe_to_test', choice: 'will_test' }] } },
       { name: 'mobility_refer_note', tile: T.note,
-        en: 'Refer them to an appropriate health facility for further examination.',
-        ne: 'उहाँलाई थप जाँचको लागि उपयुक्त स्वास्थ्य संस्थामा प्रेषण गर्नुहोस्।',
+        en: 'Suggest a check-up at the nearest health post.',
+        ne: 'नजिकको स्वास्थ्य चौकीमा जाँच गराउन सुझाव दिनुहोस्।',
         rel: { rules: [{ kind: 'cmp', field: 'sit_stand_time', choice: 'over_fourteen' }] } },
     ],
   },
   {
-    en: 'Nutrition check', ne: 'पोषण जाँच', slug: 'nutrition_check',
+    en: 'Eating and weight', ne: 'खानपान र तौल', slug: 'nutrition_check',
     rows: [
       { name: 'weight_loss', tile: T.s1, required: true,
-        en: 'In the past 3 months, has your weight decreased by more than 3 kg unintentionally (without meaning to)?',
-        ne: 'विगत ३ महिनामा तपाईंको तौल आफैँ (ननचाहँदानचाहँदै) ३ केजी भन्दा बढी घटेको छ?',
+        en: 'Has their weight dropped noticeably in the last three months without trying?',
+        ne: 'पछिल्लो तीन महिनामा आफैँ तौल उल्लेख्य घटेको छ?',
         list: { list: 'weight_loss_choice', choices: [
           { name: 'wl_yes_fail', en: 'Yes (Fail)', ne: 'छ (फेल)' },
           { name: 'wl_no_pass', en: 'No (Pass)', ne: 'छैन (पास)' },
-          { name: 'wl_dont_know', en: "Don't know", ne: 'थाहा छैन' },
+          { name: 'wl_dont_know', en: 'Not sure', ne: 'थाहा छैन' },
         ] } },
       { name: 'clothes_loose', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Have your clothes, waistband, or belt become loose?', ne: 'तपाईंको लुगा, पटुका वा बेल्ट खुकुलो भएको छ ?' },
+        en: 'Have their clothes or belt become looser?', ne: 'लुगा वा बेल्ट खुकुलो भएको छ?' },
       { name: 'appetite_loss', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Have you stopped feeling hungry?', ne: 'तपाईंलाई भोक नलाग्ने भएको छ ?',
+        en: 'Has their appetite dropped?', ne: 'खाना खाने रुचि घटेको छ?',
         rel: { rules: [{ kind: 'cmp', field: 'weight_loss', choice: 'wl_dont_know' }] } },
       { name: 'weight_kg', tile: T.num,
-        en: 'Measure their weight. (in kg)', ne: 'उहाँको तौल नाप्नुहोस्। (के.जी.मा)' },
+        en: 'Record their weight (kg).', ne: 'तौल लेख्नुहोस् (के.जी.)।' },
       { name: 'nutrition_refer_note', tile: T.note,
-        en: 'Refer them to an appropriate health facility for further examination.',
-        ne: 'उहाँलाई थप जाँचको लागि उपयुक्त स्वास्थ्य संस्थामा प्रेषण गर्नुहोस्।',
+        en: 'Suggest a check-up at the nearest health post.',
+        ne: 'नजिकको स्वास्थ्य चौकीमा जाँच गराउन सुझाव दिनुहोस्।',
         rel: { or: true, rules: [
           { kind: 'cmp', field: 'weight_loss', choice: 'wl_yes_fail' },
           { kind: 'cmp', field: 'clothes_loose', choice: 'yes_fail' },
@@ -152,54 +159,54 @@ const SECTIONS_BASE: Section[] = [
     ],
   },
   {
-    en: 'Vision check', ne: 'दृष्टि जाँच', slug: 'vision_check',
+    en: 'Eyesight', ne: 'आँखा जाँच', slug: 'vision_check',
     rows: [
       { name: 'eye_problem', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Do you have any eye-related problems? For example, difficulty seeing things far away or close up, or pain, burning, or discomfort in the eyes.',
-        ne: 'के तपाईंलाई आँखासम्बन्धी कुनै समस्या छ? जस्तै: टाढाको वा नजिकको चीज देख्न गाह्रो हुनु, वा आँखामा दुखाइ, पोल्ने वा असजिलो हुनु।' },
+        en: 'Do they have any trouble with their eyes?', ne: 'आँखा सम्बन्धी कुनै समस्या छ?' },
       { name: 'diabetes_htn_meds', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Do you have diabetes or high blood pressure, or are you currently taking steroids or any medication?',
-        ne: 'के तपाईंलाई मधुमेह वा उच्च रक्तचाप छ, वा हाल स्टेरोइड वा कुनै औषधि खाइरहनुभएको छ?' },
+        en: 'Do they have a long-term condition or take regular medicine?',
+        ne: 'दीर्घ रोग छ वा नियमित औषधि खानुहुन्छ?' },
       { name: 'external_eye', tile: T.sN, required: true,
-        en: 'Examine the external eye.', ne: 'बाह्य आँखाको जाँच गर्नुहोस्',
+        en: 'Look at the outside of both eyes and record what you see.',
+        ne: 'दुवै आँखाको बाहिरी भाग हेरेर लेख्नुहोस्।',
         list: { list: 'external_eye_findings', choices: [
-          { name: 'pus', en: 'There is pus', ne: 'पिप छ' },
-          { name: 'watery_eyes', en: 'There are tears / watery eyes', ne: 'आँसु झर्ने छ' },
-          { name: 'eyelid_inward', en: 'The eyelid is turned inward', ne: 'परेला भित्रतिर मोडिएको छ' },
-          { name: 'red_white_part', en: 'Abnormal redness in the white part of the eye', ne: 'आँखाको सेतो भागमा असामान्य रातो छ' },
-          { name: 'cloudy_cornea', en: 'The cornea is cloudy or red', ne: 'कर्निया धमिलो वा रातोपन छ' },
-          { name: 'none_of_above', en: 'None of the above', ne: 'कुनै पनि छैन' },
+          { name: 'pus', en: 'Discharge', ne: 'पिप' },
+          { name: 'watery_eyes', en: 'Watering', ne: 'आँसु' },
+          { name: 'eyelid_inward', en: 'Eyelid turned inward', ne: 'परेला भित्र मोडिएको' },
+          { name: 'red_white_part', en: 'Redness in the white of the eye', ne: 'सेतो भागमा रातोपन' },
+          { name: 'cloudy_cornea', en: 'Cloudy front of the eye', ne: 'आँखाको अगाडि धमिलो' },
+          { name: 'none_of_above', en: 'Nothing unusual', ne: 'केही असामान्य छैन' },
         ] } },
       { name: 'who_chart_note', tile: T.note,
-        en: '1. Place the WHO vision chart 3 meters away from the patient. 2. Test each eye separately. 3. Right eye: cover the left. 4. Left eye: cover the right.',
-        ne: '१. WHO दृष्टि चार्टलाई बिरामीबाट ३ मिटर टाढा राख्नुहोस्। २. प्रत्येक आँखा छुट्टाछुट्टै जाँच्नुहोस्। ३. दाहिने आँखा जाँच्दा देब्रे आँखा छोप्न लगाउनुहोस्। ४. देब्रे आँखा जाँच्दा दाहिने आँखा छोप्न लगाउनुहोस्।',
+        en: 'Set the distance chart three metres away and test one eye at a time, covering the other.',
+        ne: 'दूरी चार्ट तीन मिटर टाढा राखी अर्को आँखा छोपेर एक-एक गरी जाँच्नुहोस्।',
         rel: { rules: [{ kind: 'cmp', field: 'eye_problem', choice: 'yes_fail' }] } },
       { name: 'right_eye', tile: T.s1, required: true,
-        en: 'Right eye (WHO chart, from 3 meters)', ne: 'दाहिने आँखा (WHO चार्ट, ३ मिटरबाट)',
+        en: 'Right eye (distance chart)', ne: 'दाहिने आँखा (दूरी चार्ट)',
         list: { list: 'vision_612', choices: [
-          { name: 'see_612', en: 'Can see 6/12 (Pass)', ne: '६/१२ देख्यो (पास)' },
-          { name: 'not_see_612', en: 'Cannot see 6/12 (Fail)', ne: '६/१२ देखेन (फेल)' },
+          { name: 'see_612', en: 'Reads the target line (Pass)', ne: 'तोकिएको लाइन पढ्यो (पास)' },
+          { name: 'not_see_612', en: 'Cannot read the target line (Fail)', ne: 'तोकिएको लाइन पढ्न सकेन (फेल)' },
         ] },
         rel: { rules: [{ kind: 'cmp', field: 'eye_problem', choice: 'yes_fail' }] } },
       { name: 'left_eye', tile: T.s1, required: true, reuse: 'vision_612',
-        en: 'Left eye (WHO chart, from 3 meters)', ne: 'देब्रे आँखा (WHO चार्ट, ३ मिटरबाट)',
+        en: 'Left eye (distance chart)', ne: 'देब्रे आँखा (दूरी चार्ट)',
         rel: { rules: [{ kind: 'cmp', field: 'eye_problem', choice: 'yes_fail' }] } },
       { name: 'near_vision', tile: T.s1, required: true,
-        en: 'Both eyes together (N6 chart, from 40 cm)', ne: 'दुवै आँखासँगै (N6 चार्ट, ४० से.मि.बाट)',
+        en: 'Both eyes together, near card at 40 cm', ne: 'दुवै आँखा सँगै, नजिकको कार्ड ४० से.मि.',
         list: { list: 'vision_n6', choices: [
-          { name: 'see_n6', en: 'Can see N6 (Pass)', ne: 'N6 देख्यो (पास)' },
-          { name: 'not_see_n6', en: 'Cannot see N6 (Fail)', ne: 'N6 देखेन (फेल)' },
+          { name: 'see_n6', en: 'Reads the near card (Pass)', ne: 'नजिकको कार्ड पढ्यो (पास)' },
+          { name: 'not_see_n6', en: 'Cannot read the near card (Fail)', ne: 'नजिकको कार्ड पढ्न सकेन (फेल)' },
         ] },
         rel: { rules: [{ kind: 'cmp', field: 'eye_problem', choice: 'yes_fail' }] } },
       { name: 'glasses_retest_note', tile: T.note,
-        en: 'Retest with glasses', ne: 'चस्मासँगै पुनः परीक्षण गर्ने',
+        en: 'Try again with their glasses on.', ne: 'चस्मा लगाएर फेरि जाँच्नुहोस्।',
         rel: { rules: [{ kind: 'cmp', field: 'near_vision', choice: 'not_see_n6' }] } },
       { name: 'near_vision_glasses', tile: T.s1, required: true, reuse: 'vision_n6',
-        en: 'Both eyes together, with glasses (N6 chart, from 40 cm)', ne: 'चस्मासँगै — दुवै आँखासँगै (N6 चार्ट, ४० से.मि.बाट)',
+        en: 'Both eyes with glasses, near card at 40 cm', ne: 'चस्मासहित दुवै आँखा, नजिकको कार्ड ४० से.मि.',
         rel: { rules: [{ kind: 'cmp', field: 'near_vision', choice: 'not_see_n6' }] } },
       { name: 'eye_refer_note', tile: T.note,
-        en: 'Refer them to an eye hospital for further examination.',
-        ne: 'उहाँलाई थप जाँचका लागि आँखाको अस्पतालमा प्रेषण गर्नुहोस्।',
+        en: 'Suggest an eye check-up at the nearest eye clinic.',
+        ne: 'नजिकको आँखा क्लिनिकमा जाँच गराउन सुझाव दिनुहोस्।',
         rel: { or: true, rules: [
           { kind: 'selectedNot', field: 'external_eye', choice: 'none_of_above' },
           { kind: 'cmp', field: 'right_eye', choice: 'not_see_612' },
@@ -208,47 +215,47 @@ const SECTIONS_BASE: Section[] = [
     ],
   },
   {
-    en: 'Hearing check', ne: 'श्रवण क्षमता जाँच', slug: 'hearing_check',
+    en: 'Hearing', ne: 'कान जाँच', slug: 'hearing_check',
     rows: [
       { name: 'hearing_trouble', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Do you have trouble hearing? For example, do others have to speak loudly when talking to you, or do you have to get very close to them to hear?',
-        ne: 'के तपाईंलाई सुन्न समस्या छ? जस्तै; अरूले तपाईंसँग कुरा गर्दा चर्को आवाजमा बोल्नुपर्ने हुन्छ, वा तपाईं उहाँहरूको एकदमै नजिक गएर सुन्नुपर्ने हुन्छ?' },
+        en: 'Do they have trouble hearing everyday conversation?',
+        ne: 'दैनिक कुराकानी सुन्न गाह्रो हुन्छ?' },
       { name: 'whisper_method_note', tile: T.note,
-        en: 'Whisper Test Method: 1. Stand behind the patient, about 60 cm away. 2. Close the ear not being tested (press the tragus). 3. In one breath whisper 4 simple, unrelated words (rice, fish, bicycle, garden). 4. Ask the patient to repeat each word. 5. Also on the other ear.',
-        ne: 'कानेखुसी परीक्षण विधि: १. बिरामीको पछाडि, करिब ६० से.मि. टाढा उभिनुहोस्। २. नजाँच्ने कानको ट्रेगस थिचेर बन्द गर्न लगाउनुहोस्। ३. एउटै सासमा ४ वटा साधारण शब्द कानेखुसीमा भन्नुहोस् (चामल, माछा, साइकल, बगैंचा)। ४. प्रत्येक शब्द दोहोर्‍याउन भन्नुहोस्। ५. अर्को कानमा पनि।',
+        en: 'Stand behind them, cover the ear not being tested, and whisper four simple words: rice, fish, cycle, garden. Ask them to repeat each one, then test the other ear.',
+        ne: 'पछाडि उभिएर नजाँच्ने कान छोपी चार सजिला शब्द कानेखुसीमा भन्नुहोस्: चामल, माछा, साइकल, बगैँचा। प्रत्येक दोहोर्‍याउन लगाउनुहोस्, त्यसपछि अर्को कान जाँच्नुहोस्।',
         rel: { rules: [{ kind: 'cmp', field: 'hearing_trouble', choice: 'yes_fail' }] } },
       { name: 'right_ear', tile: T.s1, required: true,
-        en: 'Right ear result', ne: 'दायाँ कानको परिणाम',
+        en: 'Right ear result', ne: 'दाहिने कानको नतिजा',
         list: { list: 'whisper_result', choices: [
-          { name: 'four_words_pass', en: 'Successfully repeated all four words (Pass)', ne: '४ वटै शब्द दोहोर्‍याउन सफल (पास)' },
-          { name: 'four_words_fail', en: 'Unable to repeat all four words (Fail)', ne: '४ वटै शब्द दोहोर्‍याउन असफल (फेल)' },
+          { name: 'four_words_pass', en: 'Repeated all four (Pass)', ne: 'चारै दोहोर्‍याए (पास)' },
+          { name: 'four_words_fail', en: 'Could not repeat all four (Fail)', ne: 'चारै दोहोर्‍याउन सकेनन् (फेल)' },
         ] } },
       { name: 'left_ear', tile: T.s1, required: true, reuse: 'whisper_result',
-        en: 'Left ear result', ne: 'बायाँ कानको परिणाम' },
+        en: 'Left ear result', ne: 'देब्रे कानको नतिजा' },
       { name: 'ent_refer_note', tile: T.note,
-        en: 'Refer them to a health facility with an ENT (ear, nose, and throat) doctor available for further examination.',
-        ne: 'उहाँलाई थप जाँचका लागि नाक, कान र घाँटीको डाक्टर उपलब्ध हुने स्वास्थ्य संस्थामा प्रेषण गर्नुहोस्।',
-        rel: { rules: [
+        en: 'Suggest a hearing check-up at the nearest health post.',
+        ne: 'नजिकको स्वास्थ्य चौकीमा कान जाँच गराउन सुझाव दिनुहोस्।',
+        rel: { or: true, rules: [
           { kind: 'cmp', field: 'right_ear', choice: 'four_words_fail' },
           { kind: 'cmp', field: 'left_ear', choice: 'four_words_fail' },
         ] } },
     ],
   },
   {
-    en: 'Psychological check', ne: 'मनोवैज्ञानिक जाँच', slug: 'psychological_check',
+    en: 'Mood and wellbeing', ne: 'मन र भावना', slug: 'psychological_check',
     rows: [
       { name: 'feeling_sad', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Over the past 2 weeks or more, have you been feeling persistently sad, down, or discouraged?',
-        ne: 'के तपाईं पछिल्लो २ हप्ता वा त्योभन्दा बढी समयदेखि लगातार निराश, उदास, वा हतोत्साहित महसुस गरिरहनुभएको छ?' },
+        en: 'Have they felt low or down most days over the past two weeks?',
+        ne: 'पछिल्लो दुई हप्ता धेरैजसो दिन उदास महसुस गर्नुभएको छ?' },
       { name: 'lost_interest', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Over the past 2 weeks or more, have you consistently felt little interest or pleasure in doing things?',
-        ne: 'के तपाईंलाई पछिल्लो २ हप्ता वा त्योभन्दा बढी समयदेखि लगातार कुनै पनि काम वा कुरामा रुचि वा खुसी नभएको महसुस भइरहेको छ?' },
+        en: 'Have they lost interest in things they usually enjoy?',
+        ne: 'मनपर्ने कुरामा रुचि घटेको छ?' },
       { name: 'self_harm_thoughts', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Recently, have you had thoughts of harming yourself or not wanting to live?',
-        ne: 'के पछिल्लो समयमा तपाईंलाई आफूलाई हानि गर्ने वा बाँच्न मन नलाग्ने जस्ता विचार आएको छ?' },
+        en: 'Have they had thoughts of harming themselves?',
+        ne: 'आफूलाई हानि गर्ने विचार आएको छ?' },
       { name: 'mental_refer_note', tile: T.note,
-        en: 'Please provide mental health counseling to them and their family, and refer them to a health facility with a psychiatrist available.',
-        ne: 'कृपया उहाँ र परिवारलाई राखी मानसिक स्वास्थ्य सम्बन्धी परामर्श दिनुहोस् र उहाँलाई मनोचिकित्सक उपलब्ध भएको स्वास्थ्य संस्थामा प्रेषण गर्नुहोस्।',
+        en: 'Talk with them and their family, and suggest support at the nearest health post.',
+        ne: 'उहाँ र परिवारसँग कुरा गरी नजिकको स्वास्थ्य चौकीमा सहयोग लिन सुझाव दिनुहोस्।',
         rel: { or: true, rules: [
           { kind: 'cmp', field: 'feeling_sad', choice: 'yes_fail' },
           { kind: 'cmp', field: 'lost_interest', choice: 'yes_fail' },
@@ -257,60 +264,58 @@ const SECTIONS_BASE: Section[] = [
     ],
   },
   {
-    en: 'Social care and support', ne: 'सामाजिक हेरचाह र सहयोग', slug: 'social_care_and_support',
+    en: 'Home and support', ne: 'घर र सहयोग', slug: 'social_care_and_support',
     rows: [
       { name: 'family_care_satisfied', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Are you satisfied with the care provided by your household/family? For example safety, cleanliness/hygiene, and adequate space',
-        ne: 'के तपाईं आफ्नो घर परिवारको हेरचाह बाट सन्तुष्ट हुनुहुन्छ ? जस्तै -सुरक्षा, सरसफाइ, र पर्याप्त ठाउँ।' },
+        en: 'Are they happy with the care and space they have at home?',
+        ne: 'घरमा पाएको हेरचाह र ठाउँबाट सन्तुष्ट हुनुहुन्छ?' },
       { name: 'money_problems', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Have you experienced problems due to not having enough money for food, housing, and healthcare services?',
-        ne: 'खाना, आवास र स्वास्थ्य सेवाको लागि पैसा नपुगेर तपाईंले समस्या भोग्नुभएको छ?' },
+        en: 'Have costs made food, housing, or care hard to manage?',
+        ne: 'खर्चका कारण खाना, बसोबास वा उपचार धान्न गाह्रो भएको छ?' },
       { name: 'feel_lonely', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Do you often feel lonely, or do you have few people you can openly talk to?',
-        ne: 'के तपाईंलाई प्रायः एक्लो महसुस हुन्छ, वा मन खोलेर कुरा गर्ने मान्छे कम छ ?' },
+        en: 'Do they often feel alone, or have few people to talk to?',
+        ne: 'प्रायः एक्लो महसुस हुन्छ, वा कुरा गर्ने मान्छे कम छन्?' },
       { name: 'activity_difficulty', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Do you have difficulty participating in activities you enjoy?',
-        ne: 'के तपाईंलाई आफूलाई मनपर्ने क्रियाकलापहरूमा भाग लिन कठिनाइ छ?' },
+        en: 'Is it hard for them to join activities they enjoy?',
+        ne: 'मनपर्ने काममा सहभागी हुन गाह्रो छ?' },
     ],
   },
   {
-    en: 'Caregiver support', ne: 'हेरचाहकर्ताको सहयोग / हेरचाहकर्तालाई एकान्तमा सोध्नुहोस्', slug: 'caregiver_support',
+    en: 'Carer wellbeing', ne: 'हेरचाहकर्ताको अवस्था', slug: 'caregiver_support',
     rows: [
       { name: 'caregiver_helped', tile: T.s1, required: true,
-        en: 'When you take care of a sick or elderly person in your household, do you receive adequate support from your family or neighbors?',
-        ne: 'तपाईं आफ्नो घरको बिरामी वा वृद्ध मान्छेको हेरचाह गर्दा तपाईंलाई घरपरिवार वा छिमेकीबाट पर्याप्त सहयोग मिल्छ?',
+        en: 'As a carer, do you get enough help from family or neighbours?',
+        ne: 'हेरचाह गर्दा परिवार वा छिमेकीबाट पर्याप्त सहयोग मिल्छ?',
         list: { list: 'support_level', choices: [
-          { name: 'enough_support', en: 'Yes, I receive sufficient support', ne: 'हो, पर्याप्त सहयोग मिल्छ' },
-          { name: 'sometimes_support', en: 'I receive support only sometimes', ne: 'कहिलेकाहीँ मात्र मिल्छ' },
-          { name: 'alone_mostly', en: 'No, I have to do it alone most of the time', ne: 'होइन, धेरैजसो एक्लै गर्नुपर्छ' },
+          { name: 'enough_support', en: 'Yes, enough help', ne: 'पर्याप्त सहयोग मिल्छ' },
+          { name: 'sometimes_support', en: 'Only sometimes', ne: 'कहिलेकाहीँ मात्र' },
+          { name: 'alone_mostly', en: 'Mostly on my own', ne: 'धेरैजसो एक्लै' },
         ] } },
       { name: 'caregiver_confidence', tile: T.s1, required: true,
-        en: 'Do you feel confident that you can take good care of your elderly or sick family member?',
-        ne: 'तपाईंलाई आफ्नो वृद्ध वा बिरामी मान्छेको राम्रोसँग हेरचाह गर्न सकिन्छ भन्ने विश्वास छ?',
+        en: 'Do you feel you know what to do day to day?',
+        ne: 'दैनिक के गर्ने भन्ने थाहा छ भन्ने लाग्छ?',
         list: { list: 'confidence_level', choices: [
-          { name: 'knows_what_to_do', en: 'Yes, I know what to do', ne: 'छ, मलाई थाहा छ के गर्ने' },
-          { name: 'some_confusion', en: 'I am confused about some things', ne: 'केही कुरामा अलमल हुन्छ' },
-          { name: 'doesnt_know', en: "No, I don't know much about it", ne: 'छैन, धेरै कुरा थाहा छैन' },
+          { name: 'knows_what_to_do', en: 'Yes, I know what to do', ne: 'थाहा छ' },
+          { name: 'some_confusion', en: 'Unsure about some things', ne: 'केही कुरामा अलमल' },
+          { name: 'doesnt_know', en: 'Often unsure', ne: 'प्रायः थाहा हुँदैन' },
         ] } },
       { name: 'caregiver_health', tile: T.s1, required: true,
-        en: 'Has caregiving affected your own health? For example: back pain, fatigue, or trouble sleeping?',
-        ne: 'हेरचाह गर्दागर्दै तपाईंको आफ्नो स्वास्थ्यमा असर परेको छ? जस्तै; ढाड दुख्ने, थकान लाग्ने, निद्रा नलाग्ने?',
+        en: 'Has caring affected your own health?', ne: 'हेरचाहले आफ्नो स्वास्थ्यमा असर परेको छ?',
         list: { list: 'health_impact', choices: [
           { name: 'no_impact', en: 'No', ne: 'छैन' },
-          { name: 'sometimes_impact', en: 'Sometimes', ne: 'कहिलेकाहीँ हुन्छ' },
-          { name: 'mostly_impact', en: 'Most of the time', ne: 'धेरैजसो हुन्छ' },
+          { name: 'sometimes_impact', en: 'Sometimes', ne: 'कहिलेकाहीँ' },
+          { name: 'mostly_impact', en: 'Most of the time', ne: 'धेरैजसो' },
         ] } },
       { name: 'caregiver_finance', tile: T.s1, required: true,
-        en: 'Has caregiving affected your own work or income? Has it been difficult to afford the cost of medicine, treatment, or care?',
-        ne: 'हेरचाहको कारणले तपाईंको आफ्नो काम वा कमाइमा असर परेको छ? औषधि, उपचार, वा हेरचाहको खर्च धान्न गाह्रो भएको छ?',
+        en: 'Has caring affected your work or income?', ne: 'हेरचाहले काम वा आम्दानीमा असर परेको छ?',
         list: { list: 'finance_impact', choices: [
           { name: 'no_difficulty', en: 'No difficulty', ne: 'छैन' },
-          { name: 'some_difficulty', en: 'Some difficulty', ne: 'केही गाह्रो छ' },
-          { name: 'much_difficulty', en: 'A lot of difficulty', ne: 'धेरै गाह्रो छ' },
+          { name: 'some_difficulty', en: 'Some difficulty', ne: 'केही गाह्रो' },
+          { name: 'much_difficulty', en: 'A lot of difficulty', ne: 'धेरै गाह्रो' },
         ] } },
       { name: 'caregiver_counsel_note', tile: T.note,
-        en: 'Discuss psychosocial counselling, self care, and respite care to reduce caregiver burden.',
-        ne: 'हेरचाहकर्ताको बोझ कम गर्न मनोसामाजिक परामर्श, आफ्नो हेरचाह र केही समयका लागि वैकल्पिक हेरचाहको व्यवस्था गर्ने वारे छलफल गर्नुहोस्।',
+        en: 'Talk through practical support and arranging a short break from caring.',
+        ne: 'व्यावहारिक सहयोग र केही समय विश्रामको व्यवस्थाबारे कुरा गर्नुहोस्।',
         rel: { or: true, rules: [
           { kind: 'cmp', field: 'caregiver_helped', choice: 'alone_mostly' },
           { kind: 'cmp', field: 'caregiver_confidence', choice: 'doesnt_know' },
@@ -320,29 +325,29 @@ const SECTIONS_BASE: Section[] = [
     ],
   },
   {
-    en: 'Urinary continence', ne: 'पिसाब नियन्त्रण / एकान्तमा, सहानुभूतिपूर्वक सोध्नुहोस्', slug: 'urinary_continence',
+    en: 'Bladder comfort', ne: 'पिसाब सम्बन्धी', slug: 'urinary_continence',
     rows: [
       { name: 'urine_control', tile: T.s1, required: true, reuse: 'pass_fail',
-        en: 'Do you have trouble holding your urine until you reach the toilet when you feel the urge to urinate?',
-        ne: 'तपाईंलाई पिसाब लागेको बेलामा चर्पी पुग्नेबेलासम्म रोक्न नसक्ने समस्या भएको छ ?' },
+        en: 'Do they have trouble reaching the toilet in time?',
+        ne: 'समयमा शौचालय पुग्न गाह्रो हुन्छ?' },
       { name: 'urine_advice_note', tile: T.note,
-        en: 'Reassure them that this is common and treatable. Reduce tea and coffee intake. If necessary, refer to a primary health center.',
-        ne: 'ढाडस दिनुहोस् यो सामान्य र उपचारयोग्य छ भनी। चिया, कफी कम गर्नुहोस्। आवश्यक भएमा प्राथमिक स्वास्थ्य केन्द्रमा रेफर गर्नुहोस्।',
+        en: 'Reassure them this is common and can be helped. Suggest a check-up if it continues.',
+        ne: 'यो सामान्य हो र सुधार्न सकिन्छ भनी ढाडस दिनुहोस्। जारी रहे जाँच गराउन सुझाव दिनुहोस्।',
         rel: { rules: [{ kind: 'cmp', field: 'urine_control', choice: 'yes_fail' }] } },
     ],
   },
   {
-    en: 'Health and lifestyle advice', ne: 'स्वास्थ्य र जीवनशैली सम्बन्धी सल्लाह /परामर्श', slug: 'health_and_lifestyle_advice',
+    en: 'Wellness advice', ne: 'स्वस्थ जीवनशैली सल्लाह', slug: 'health_and_lifestyle_advice',
     rows: [
       { name: 'lifestyle_advice_note', tile: T.note,
-        en: '1. Regular physical activity. 2. Healthy diet. 3. Adequate fluid intake. 4. Oral hygiene. 5. Social contact and community participation. 6. Reduce heart-disease risk. 7. Quit smoking and alcohol. 8. Pay attention to mental health. 9. Quality sleep. 10. Eye and ear health.',
-        ne: '१. नियमित शारीरिक गतिविधि। २. स्वस्थ आहार। ३. पर्याप्त तरल पदार्थ। ४. मुखको सरसफाइ। ५. सामाजिक सम्पर्क। ६. मुटु रोगको जोखिम घटाउने। ७. धूम्रपान र मद्यपान छोड्ने। ८. मानसिक स्वास्थ्य। ९. गुणस्तरीय निद्रा। १०. आँखा र कानको स्वास्थ्य।' },
+        en: 'Talk through: daily movement, balanced meals, drinking enough water, dental care, staying social, good sleep, and regular eye and ear checks.',
+        ne: 'छलफल गर्नुहोस्: दैनिक हिँडडुल, सन्तुलित खाना, पर्याप्त पानी, दाँतको सरसफाइ, सामाजिक सम्पर्क, राम्रो निद्रा, र नियमित आँखा-कान जाँच।' },
     ],
   },
 ];
 
-/** The 7 referral-flag domain conditions (QA brief 1b — the spec-gap closure).
- *  Hearing: sheet says "and"; built as OR per the brief, flagged as ambiguity C1. */
+/** The 7 referral-flag domain conditions. These are the contract the follow-up
+ *  form and the task both read, so the names are stable. */
 export const REFER_FLAGS: Array<{ name: string; rel: { or?: boolean; rules: Rel[] } }> = [
   { name: 'refer_cognitive', rel: { or: true, rules: [
     { kind: 'cmp', field: 'word_recall', choice: 'recall_fail' },
@@ -378,56 +383,58 @@ export const REFER_FLAGS: Array<{ name: string; rel: { or?: boolean; rules: Rel[
 ];
 
 const YES_NO: NewList = { list: 'yes_no', choices: [
-  { name: 'yes', en: 'Yes', ne: 'छ' },
-  { name: 'no', en: 'No', ne: 'छैन' },
+  { name: 'yes', en: 'Yes', ne: 'हो' },
+  { name: 'no', en: 'No', ne: 'होइन' },
 ] };
 const STATUS = (list: string): NewList => ({ list, choices: [
-  { name: `${list}_improving`, en: 'Improving', ne: 'सुधारोन्मुख' },
-  { name: `${list}_same`, en: 'No change', ne: 'उस्तै छ' },
-  { name: `${list}_worse`, en: 'Getting worse', ne: 'झन् खराब' },
+  { name: `${list}_improving`, en: 'Better', ne: 'सुधार' },
+  { name: `${list}_same`, en: 'About the same', ne: 'उस्तै' },
+  { name: `${list}_worse`, en: 'Worse', ne: 'बिग्रँदै' },
 ] });
 const visitedYes: Rel = { kind: 'cmp', field: 'visited_facility', choice: 'yes' };
 const flagTrue = (f: string): Rel => ({ kind: 'cmp', field: f, choice: 'true' });
 
-/** The Referral Follow-up form's 16 rows (sheet R3-R16), flag-gated per
- *  domain. Single source of truth, reused by every geriatric build spec. */
+/** The follow-up form's rows, each gated on the matching refer_* flag that the
+ *  task delivers through modifyContent. Single source of truth, reused by every
+ *  demo build spec. */
 export const FOLLOWUP_ROWS: Row[] = [
   { name: 'visited_facility', tile: T.s1, required: true, list: YES_NO,
-    en: 'Did they visit a relevant health facility or doctor for further evaluation?',
-    ne: 'के उहाँ सम्बन्धित स्वास्थ्य संस्था वा डाक्टरकहाँ थप जाँचका लागि जानुभएको थियो?' },
+    en: 'Did they go for the check-up that was suggested?',
+    ne: 'सुझाव गरिएको जाँचका लागि जानुभयो?' },
   { name: 'formal_exam', tile: T.s1, required: true, reuse: 'yes_no',
-    en: 'Was a formal examination conducted at the referred health facility?',
-    ne: 'के प्रेषण संस्थामा औपचारिक परीक्षण भएको छ ?', rel: { rules: [visitedYes] } },
+    en: 'Were they examined at the facility?',
+    ne: 'संस्थामा जाँच भयो?', rel: { rules: [visitedYes] } },
   { name: 'diagnosis_result', tile: T.text,
-    en: 'Diagnosis / Result', ne: 'निदान / परिणाम', rel: { rules: [visitedYes] } },
+    en: 'What was found?', ne: 'के भेटियो?', rel: { rules: [visitedYes] } },
   { name: 'meds_started', tile: T.s1, required: true, reuse: 'yes_no',
-    en: 'Was medication or therapy started?', ne: 'औषधि वा थेरापी सुरु भयो ?', rel: { rules: [visitedYes] } },
+    en: 'Was any treatment started?', ne: 'कुनै उपचार सुरु भयो?', rel: { rules: [visitedYes] } },
   { name: 'memory_improvement', tile: T.s1, required: true, list: STATUS('mem'),
-    en: 'Improvement in memory', ne: 'सम्झने क्षमतामा सुधार',
+    en: 'Memory since the last visit', ne: 'गत भेटपछि सम्झना',
     rel: { rules: [visitedYes, flagTrue('refer_cognitive')] } },
   { name: 'sit_stand_followup', tile: T.s1, required: true, list: STATUS('mob'),
-    en: 'Time taken to complete five sit-to-stand repetitions', ne: '५ पटक उठन-बस्न लागेको समय',
+    en: 'Sit-to-stand since the last visit', ne: 'गत भेटपछि उठ्ने-बस्ने',
     rel: { rules: [visitedYes, flagTrue('refer_mobility')] } },
   { name: 'weight_increased', tile: T.s1, required: true, list: STATUS('nut'),
-    en: 'Has the weight increased?', ne: 'तौल बढेको छ ?',
+    en: 'Weight since the last visit', ne: 'गत भेटपछि तौल',
     rel: { rules: [visitedYes, flagTrue('refer_nutrition')] } },
   { name: 'external_eye_now', tile: T.s1, required: true, list: STATUS('eye'),
-    en: 'What is the current external condition of the eye?', ne: 'हाल बाह्य आँखाको अवस्था कस्तो छ ?',
+    en: 'Eye condition since the last visit', ne: 'गत भेटपछि आँखाको अवस्था',
     rel: { rules: [visitedYes, flagTrue('refer_vision')] } },
   { name: 'hearing_status', tile: T.s1, required: true, list: STATUS('ear'),
-    en: 'What is the current status of hearing ability?', ne: 'श्रवण क्षमताको अवस्था कस्तो छ ?',
+    en: 'Hearing since the last visit', ne: 'गत भेटपछि सुन्ने क्षमता',
     rel: { rules: [visitedYes, flagTrue('refer_hearing')] } },
   { name: 'psych_status', tile: T.s1, required: true, list: STATUS('psy'),
-    en: 'Psychological status', ne: 'मनोवैज्ञानिक अवस्था',
+    en: 'Mood since the last visit', ne: 'गत भेटपछि मनको अवस्था',
     rel: { rules: [visitedYes, flagTrue('refer_psych')] } },
   { name: 'continence_status', tile: T.s1, required: true, list: STATUS('con'),
-    en: 'Urinary continence', ne: 'पिसाब नियन्त्रण',
+    en: 'Bladder comfort since the last visit', ne: 'गत भेटपछि पिसाब नियन्त्रण',
     rel: { rules: [visitedYes, flagTrue('refer_continence')] } },
   { name: 'not_visited_note', tile: T.note,
-    en: 'Advise the family that further treatment is required and refer them immediately to an appropriate health facility.',
-    ne: 'उहाँलाई थप उपचारको आवश्यकता भएको भनि घर परिवारलाई सल्लाह दिनुहोस् र उपचार हुने स्वास्थ्य संस्थामा तुरुन्तै प्रेषण गर्नुहोस् ।',
+    en: 'Encourage the family to arrange the visit soon.',
+    ne: 'चाँडै जाँचको व्यवस्था गर्न परिवारलाई प्रोत्साहन दिनुहोस्।',
     rel: { rules: [{ kind: 'cmp', field: 'visited_facility', choice: 'no' }] } },
 ];
+
 
 /* ─────────────────────────── builder drivers ─────────────────────────── */
 
