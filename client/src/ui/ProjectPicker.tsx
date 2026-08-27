@@ -35,18 +35,10 @@ export function ProjectPicker() {
       <div className="card">
         <h1>CHT UI Builder</h1>
         <p className="subtitle">No-code editor for cht-conf project folders.</p>
-        <p>Open a project folder to begin. Examples:</p>
-        <ul>
-          <li>
-            <code>W:\ui-builder-for-cht\config-gandaki\cht-config</code>
-          </li>
-          <li>
-            <code>W:\ui-builder-for-cht\config-nssd\chis</code>
-          </li>
-          <li>
-            <code>W:\ui-builder-for-cht\config-nssd\waling</code>
-          </li>
-        </ul>
+        <p>
+          Open a cht-conf project folder to begin — the directory containing{' '}
+          <code>app_settings.json</code> and <code>forms/</code>.
+        </p>
         <label htmlFor="project-path">Project folder (absolute path)</label>
         <div className="row">
           <input

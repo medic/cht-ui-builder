@@ -39,8 +39,11 @@ import {
   createAppForm, addSection, addRow, fillRuleList,
 } from './helpers/geriatric.js';
 import type { Row, Rel } from './helpers/geriatric.js';
+import os from 'node:os';
 
-const PARENT = 'W:\\medic\\ui-builder-projects';
+// Output location. Defaults to the OS temp dir so a fresh clone runs;
+// set BUILD_OUTPUT_DIR to keep the built project somewhere durable.
+const PARENT = process.env.BUILD_OUTPUT_DIR ?? os.tmpdir();
 const PROJECT = path.join(PARENT, 'geriatric-workflow');
 const INSTANCE = 'https://127-0-0-1.local-ip.medicmobile.org:10445';
 const CHW = { user: 'geri_chw', pass: 'ElderCare!2026z' };

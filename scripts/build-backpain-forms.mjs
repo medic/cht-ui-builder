@@ -294,9 +294,15 @@ const followupForm = {
 /* ----------------------------------------------------------------------
  * Write files.
  * --------------------------------------------------------------------*/
-const outDir =
-  process.argv[2] ??
-  path.resolve(new URL('..', import.meta.url).pathname, '..', 'config-gandaki', 'cht-config', 'forms', 'app');
+// This repo ships no CHT config; pass the target forms/app directory explicitly.
+const outDir = process.argv[2] ?? process.env.CHT_FORMS_DIR;
+if (!outDir) {
+  console.error(
+    'Usage: node scripts/build-backpain-forms.mjs <path-to/forms/app>\n' +
+      '   or: CHT_FORMS_DIR=<path-to/forms/app> node scripts/build-backpain-forms.mjs',
+  );
+  process.exit(2);
+}
 
 const sBuf = await serializeXlsForm(surveillanceForm);
 const fBuf = await serializeXlsForm(followupForm);

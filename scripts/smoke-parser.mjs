@@ -20,17 +20,15 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const target =
-  process.argv[2] ??
-  path.resolve(
-    new URL('..', import.meta.url).pathname,
-    '..',
-    'config-gandaki',
-    'cht-config',
-    'forms',
-    'app',
-    'pregnancy.xlsx',
+// This repo ships no CHT config; point the smoke test at a real one.
+const target = process.argv[2] ?? process.env.CHT_FORM;
+if (!target) {
+  console.error(
+    'Usage: node scripts/smoke-parser.mjs <path-to-form.xlsx>\n' +
+      '   or: CHT_FORM=<path-to-form.xlsx> node scripts/smoke-parser.mjs',
   );
+  process.exit(2);
+}
 
 const ext = path.extname(target).toLowerCase();
 

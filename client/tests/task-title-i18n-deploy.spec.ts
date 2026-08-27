@@ -30,10 +30,13 @@ import { test, expect } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
+import os from 'node:os';
 
 const LIVE = process.env.LIVE_DEPLOY === '1';
 const API = 'http://127.0.0.1:5174';
-const PARENT = 'W:\\medic\\ui-builder-projects';
+// Output location. Defaults to the OS temp dir so a fresh clone runs;
+// set BUILD_OUTPUT_DIR to keep the built project somewhere durable.
+const PARENT = process.env.BUILD_OUTPUT_DIR ?? os.tmpdir();
 const NAME = 'title-i18n-smoke';
 const PROJECT = path.join(PARENT, NAME);
 const INSTANCE = 'https://127-0-0-1.local-ip.medicmobile.org:10445';

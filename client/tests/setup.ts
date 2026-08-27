@@ -1,4 +1,6 @@
 import { test as base, expect } from '@playwright/test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,5 +39,27 @@ export const test = base.extend<{ projectOpen: void }>({
     { auto: true },
   ],
 });
+
+/**
+ * Copy the project fixture into a throwaway directory and return its path.
+ *
+ * Specs that BUILD forms (rather than just read them) must never write into
+ * the committed fixture — round-trip safety is the repo's invariant, and a
+ * dirtied fixture makes every later run start from a different place. This is
+ * the shared form of the `mkdtemp` + `fs.cp` pattern that the editing specs
+ * already use inline.
+ *
+ * Source is `PROJECT_PATH`, so `PLAYWRIGHT_PROJECT_PATH` points the whole
+ * suite at a richer cht-conf project when you have one. With nothing exported,
+ * a fresh clone still runs: it copies the committed fixture.
+ *
+ * The caller owns cleanup — `await fs.rm(dir, { recursive: true, force: true })`
+ * in a `finally`, or leave it in the OS temp dir for post-mortem.
+ */
+export async function makeScratchProject(label = 'e2e'): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `cht-ui-${label}-`));
+  await fs.cp(PROJECT_PATH, dir, { recursive: true });
+  return dir;
+}
 
 export { expect };

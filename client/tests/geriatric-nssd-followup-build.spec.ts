@@ -40,8 +40,11 @@ import {
   ensureFullMode, rowByName, saveForm, readForm,
   createAppForm, addRow, openProjectAt,
 } from './helpers/geriatric.js';
+import { PROJECT_PATH } from './setup.js';
 
-const PROJECT = 'W:\\medic\\config-nssd\\chis';
+// Project under test. Defaults to the committed fixture so a fresh clone runs;
+// set CHT_PROJECT (or PLAYWRIGHT_PROJECT_PATH) to drive a real cht-conf project.
+const PROJECT = process.env.CHT_PROJECT ?? PROJECT_PATH;
 const FOLLOWUP_TITLE = 'Geriatric Referral Followup';
 const FOLLOWUP = 'geriatric_referral_followup';
 const FOLLOWUP_FORM_ID = `app:${FOLLOWUP}`;

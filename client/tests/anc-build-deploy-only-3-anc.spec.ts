@@ -34,13 +34,14 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const API = 'http://127.0.0.1:5174';
 
 // Output location. Defaults to the user's real folder (kept after the run);
 // override with ANC_OUTPUT_DIR for a portable/CI path.
-const PARENT = process.env.ANC_OUTPUT_DIR ?? 'W:\\medic\\ui-builder-projects';
+const PARENT = process.env.ANC_OUTPUT_DIR ?? os.tmpdir();
 const PROJECT_NAME = 'anc-workflow';
 const PROJECT_PATH = path.join(PARENT, PROJECT_NAME);
 

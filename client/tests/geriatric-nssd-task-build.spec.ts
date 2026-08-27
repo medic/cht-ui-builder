@@ -28,11 +28,15 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import { REFER_FLAGS, openProjectAt } from './helpers/geriatric.js';
+import { PROJECT_PATH } from './setup.js';
+import path from 'node:path';
 
-const PROJECT = 'W:\\medic\\config-nssd\\chis';
+// Project under test. Defaults to the committed fixture so a fresh clone runs;
+// set CHT_PROJECT (or PLAYWRIGHT_PROJECT_PATH) to drive a real cht-conf project.
+const PROJECT = process.env.CHT_PROJECT ?? PROJECT_PATH;
 const IHA = 'geriatric_health_assessment';
 const FOLLOWUP = 'geriatric_referral_followup';
-const TASKS_JS = 'W:\\medic\\config-nssd\\chis\\tasks.js';
+const TASKS_JS = path.join(PROJECT, 'tasks.js');
 
 /** Hand-edit #3 (documented) — the resolvedIf start clamp (A4, still
  *  `{ todo: true }` on HEAD). Finds our new task's resolvedIf function and

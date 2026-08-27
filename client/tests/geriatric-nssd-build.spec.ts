@@ -35,8 +35,11 @@ import {
   addSection, addRow, fillRuleList,
 } from './helpers/geriatric.js';
 import type { Row, Rel } from './helpers/geriatric.js';
+import { PROJECT_PATH } from './setup.js';
 
-const PROJECT = 'W:\\medic\\config-nssd\\chis';
+// Project under test. Defaults to the committed fixture so a fresh clone runs;
+// set CHT_PROJECT (or PLAYWRIGHT_PROJECT_PATH) to drive a real cht-conf project.
+const PROJECT = process.env.CHT_PROJECT ?? PROJECT_PATH;
 const IHA_TITLE = 'Integrated Health Assessment form for elder population';
 const IHA = 'integrated_health_assessment_form_for_elder_population';
 const FU_TITLE = 'Geriatric care follow up form';

@@ -10,8 +10,12 @@
  */
 import { test, expect } from '@playwright/test';
 import { openProjectAt } from './helpers/geriatric.js';
+import { PROJECT_PATH } from './setup.js';
+import path from 'node:path';
 
-const PROJECT = 'W:\\medic\\config-nssd\\chis';
+// Project under test. Defaults to the committed fixture so a fresh clone runs;
+// set CHT_PROJECT (or PLAYWRIGHT_PROJECT_PATH) to drive a real cht-conf project.
+const PROJECT = process.env.CHT_PROJECT ?? PROJECT_PATH;
 
 test('fix: appliesIf OR group must cover all 7 refer_* flags', async ({ page }) => {
   test.setTimeout(300_000);
@@ -51,7 +55,7 @@ test('fix: appliesIf OR group must cover all 7 refer_* flags', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeVisible({ timeout: 20_000 });
 
   const fs = await import('node:fs/promises');
-  const src = await fs.readFile('W:\\medic\\config-nssd\\chis\\tasks.js', 'utf8');
+  const src = await fs.readFile(path.join(PROJECT, 'tasks.js'), 'utf8');
   const idx = src.indexOf("name: 'geriatric_referral_followup'");
   const start = src.lastIndexOf('{', idx);
   const appliesIfStart = src.indexOf('appliesIf:', start);

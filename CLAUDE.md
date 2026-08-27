@@ -52,12 +52,13 @@ Note `pnpm test` only exists in `shared` (uses Node's built-in test runner over
 ## You need a cht-conf project folder to actually test
 
 This repo does **not** contain any CHT config. The app operates on an external
-folder whose absolute path you enter on the first screen. The README references
-sibling folders that exist only on the original machine, e.g.
-`W:\medic\config-gandaki\cht-config`. **On a fresh machine these
-won't exist** — clone or obtain a cht-conf project folder before expecting the
-editor (or the smoke test) to do anything. The last-opened path is remembered in
-`~/.cht-ui-builder/state.json`.
+folder whose absolute path you enter on the first screen — the directory holding
+`app_settings.json` and `forms/`. **Clone or obtain a cht-conf project folder
+before expecting the editor (or the smoke test) to do anything.** The last-opened
+path is remembered in `~/.cht-ui-builder/state.json`.
+
+Scripts that need a project folder take it as an argument or via the
+`CHT_PROJECT` environment variable — none of them hardcode a path.
 
 ## Non-negotiable invariant: round-trip safety
 
@@ -105,10 +106,10 @@ ever set a model. When authoring a `Workflow` script in this repo, tier every
 stage instead of leaving it to inherit the session model:
 
 ```js
-agent(scanPrompt,   { agentType: 'searcher' })      // pure file/symbol location
-agent(logPrompt,    { agentType: 'log-scanner' })   // extract failures from build/test/CI output
-agent(refutePrompt, { model: 'sonnet' })            // redundant "is this real?" voter
-agent(synthPrompt,  { effort: 'high' })             // synthesis / persona lens / final verify
+agent(scanPrompt, { agentType: 'searcher' }); // pure file/symbol location
+agent(logPrompt, { agentType: 'log-scanner' }); // extract failures from build/test/CI output
+agent(refutePrompt, { model: 'sonnet' }); // redundant "is this real?" voter
+agent(synthPrompt, { effort: 'high' }); // synthesis / persona lens / final verify
 ```
 
 `searcher` and `log-scanner` (both `model: haiku`, read-only tools) are defined

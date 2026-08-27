@@ -32,9 +32,17 @@ import {
   addSection, addRow, fillRuleList,
 } from './helpers/geriatric.js';
 import type { Row, Rel } from './helpers/geriatric.js';
+import { PROJECT_PATH } from './setup.js';
+import { fileURLToPath } from 'node:url';
 
-const PROJECT = 'W:\\medic\\config-nssd\\chis';
-const CHT_BIN = 'W:\\medic\\ui-builder-for-cht\\server\\node_modules\\.bin\\cht.cmd';
+// Project under test. Defaults to the committed fixture so a fresh clone runs;
+// set CHT_PROJECT (or PLAYWRIGHT_PROJECT_PATH) to drive a real cht-conf project.
+const PROJECT = process.env.CHT_PROJECT ?? PROJECT_PATH;
+const here = path.dirname(fileURLToPath(import.meta.url));
+const CHT_BIN =
+  process.env.CHT_BIN ??
+  path.resolve(here, '..', '..', 'server', 'node_modules', '.bin',
+    process.platform === 'win32' ? 'cht.cmd' : 'cht');
 const INSTANCE = 'https://127-0-0-1.local-ip.medicmobile.org:10445';
 const CHW = { user: 'nssd_chw', pass: 'NssdCare!2026x' };
 const ELDER_ID = '8ad27ba1-3568-447d-88d1-be4b77d422ec';
