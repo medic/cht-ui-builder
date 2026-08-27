@@ -13,14 +13,23 @@ files.
 
 ## Quick start
 
-Requires **Node ≥ 22.13** and **pnpm 11.2.2**.
+Requires **Node ≥ 20** (CI runs 22) and **pnpm 11.2.2** — `corepack enable`
+picks up the pinned version from `packageManager` in `package.json`. This is a
+pnpm workspace and uses the `workspace:*` protocol; **npm and yarn cannot
+install it**.
 
 ```sh
 pnpm install
+pnpm --filter @cht-ui/shared build   # required — client/server import its dist/
 pnpm dev
 ```
 
-This boots two services in parallel:
+The `shared` build is not optional: `shared` is consumed via its compiled
+`dist/`, which is gitignored, and no `postinstall` hook builds it for you. Skip
+it and the client fails to resolve `@cht-ui/shared`.
+
+This boots the two services you interact with, in parallel (plus a `tsc --watch`
+on `shared`, so edits to the parsers recompile as you go):
 
 - Fastify API on http://localhost:5174 (`/api/...`)
 - Vite client on http://localhost:5173 (proxies `/api` to the server)
@@ -29,14 +38,23 @@ Open http://localhost:5173. On the first screen you can either:
 
 - Type the absolute path to an existing cht-conf project folder, or
 - Click **Browse…** to pick one with a folder browser, or
-- Click **✨ Create new project…** to scaffold a fresh project from a
-  starter template (Blank or Malaria-screening).
+- Click **✨ Create new project…** to scaffold a fresh project from a starter
+  template. Four ship, in `server/templates/`:
+
+| Template | Ships |
+|---|---|
+| **CHT baseline** (`cht-default`) | 16 app-form `.xlsx` + settings + translations — **start here** |
+| **Malaria screening** (`malaria`) | settings, tasks, targets, contact summary — but **no form `.xlsx`** yet |
+| **Blank** (`blank`) | contact types declared, no forms |
+| **Empty** (`empty`) | the bare minimum cht-conf will accept |
 
 The last-opened path is remembered in `~/.cht-ui-builder/state.json`.
 
-> You need an actual cht-conf project folder somewhere on disk to do
-> anything useful. The repo doesn't bundle one; the Malaria starter template
-> is the fastest way to get one to play with.
+> You need an actual cht-conf project folder on disk to do anything useful.
+> The repo doesn't bundle a deployable one — **CHT baseline** is the fastest
+> way to get a project with real forms in it. A minimal fixture used by the
+> test suite lives at `client/tests/fixtures/mini-config/` if you just want
+> something to open.
 
 ## What's in v0.1
 
@@ -123,11 +141,27 @@ Structured editor for `tasks.js`.
 
 ### Contact summary
 
-Edits the `context` object in `contact-summary.templated.js`. Each context
-flag is a card with name + JS expression; add / rename / remove / edit.
+Edits `contact-summary.templated.js` across five tabs — **structured** (the
+`context` object: each flag a card with name + JS expression, add / rename /
+remove / edit), **values**, **cards**, **helpers** (the predicates in
+`contact-summary-extras.js`), and **raw**.
 
-`fields[]` and `cards[]` are preserved byte-identical but not editable in
-this build (deferred — see *Not in MVP* below).
+`fields[]` is preserved byte-identical and not editable in this build
+(deferred — see *Not in MVP* below).
+
+### Translations
+
+Edits the `.properties` translation files, parsed and rewritten losslessly —
+duplicate keys, ordering, and unknown locales are preserved. Task titles
+written by the Tasks editor land here as `task.<name>.title` keys.
+
+### Standard codes
+
+FHIR terminology workbench: map form questions to standard codes from the
+vendored dictionaries (LOINC, ICD-11, CIEL — no SNOMED, for licensing
+reasons, and a CI test enforces that). Mappings round-trip through a sidecar
+file; starter packs seed common CHT question shapes. Gated on the project
+having app forms.
 
 ### Decisions (sign-off)
 
@@ -201,29 +235,37 @@ are the upper bound).
 
 ## Tests
 
-**66 tests passing across two workspaces:**
+**982 tests across three suites.** See [docs/testing-map.md](docs/testing-map.md)
+for the per-file index.
 
 ```sh
 pnpm --filter @cht-ui/shared build && pnpm --filter @cht-ui/shared test
 pnpm --filter @cht-ui/server build && pnpm --filter @cht-ui/server test
+pnpm --filter @cht-ui/client test:e2e
 ```
 
-| Workspace | Cases | Coverage |
-|---|---:|---|
-| `shared` | 47 | `renameList`, `hierarchyOrder` toposort, `inlineChoices` round-trip via real `serializeXlsForm` ↔ `parseXlsForm`, `relevantParser` date branch, `appliesIfParser` round-trip |
-| `server` | 19 | `errorPatterns` regex sanity, `pushLine` additive-pipeline contract (byte-equal stderr reconstruction) |
+| Suite | Files | Cases | Coverage |
+|---|---:|---:|---|
+| `shared` (`node --test` over `dist/`) | 56 | 818 | parse/serialize round-trip safety across `xlsform`, `tasks`, `contactSummary`, `preflight`, `fhir`, `hierarchy`, `translations`, `conditionBuilder` |
+| `server` (`node --test` over `dist/`) | 7 | 73 | `errorPatterns` regex sanity, `pushLine` additive-pipeline contract (byte-equal stderr reconstruction), parse cache, deploy routes |
+| `client` (Playwright) | 29 | 91 | the editor driven through the real UI |
 
-**Round-trip smoke test** against a real form:
+> **The `shared` run prints `✖ failing tests:` and a stack of AssertionErrors,
+> then exits 0.** That is expected: 37 cases are `todo` pins in the
+> `*.hostile.test.ts` files, each recording the *correct* behaviour for an input
+> shape a parser currently gets wrong. A todo flipping to pass is the signal a
+> bug is fixed — don't delete them to quieten the output.
+
+**Round-trip smoke test** against any form:
 
 ```sh
 pnpm --filter @cht-ui/shared build
-node scripts/smoke-parser.mjs <path-to-a-real>/forms/app/some-form.xlsx
+node scripts/smoke-parser.mjs client/tests/fixtures/mini-config/forms/app/pregnancy.xlsx
 # Expected: survey stats + "Round-trip stable: YES"
 ```
 
-The smoke script defaults to a path that exists only on the original dev
-machine — point it at your own form for now. A checked-in fixture under
-`fixtures/cht-config-min/` is on Anita's punch list (see *What's next*).
+It takes the form path as an argument (or `CHT_FORM`) and has no default —
+point it at the committed fixture above, or at a form in your own project.
 
 ## Persona-driven dogfood
 
@@ -250,9 +292,9 @@ the next sprint's punch list.
 - **Live Enketo form preview** — the current "preview" pane is a simplified
   stacked-field view, not a real XPath evaluator. A real live preview is
   scoped as a separate two-sprint project after the next polish round.
-- **`fields[]` / `cards[]` editor** in contact summary — preserved
-  byte-identical; visual editor is the next CommCare-parity item after
-  live preview.
+- **`fields[]` editor** in contact summary — preserved byte-identical; the
+  visual editor is the next CommCare-parity item after live preview.
+  (`cards[]` **is** editable — see *Contact summary* above.)
 - **`targets.js`** — explicitly out of scope (user decision).
 - **SMS forms** / `registrations[]` / `schedules.json` / `forms.json`
   (Devanagari forms) — preserved verbatim, no UI editor.
@@ -260,9 +302,6 @@ the next sprint's punch list.
   inside the editor. Use the **Deploy → Convert app forms** button (or
   `cht-conf convert-app-forms` from CLI).
 - **Git integration** (status / diff / commit) — out of scope.
-- **CI workflow + Playwright fleet** — Anita's row-6 blocker. Dry-run mode
-  is in place; the GitHub Actions workflow + the checked-in fixture
-  project are the next testability deliverable.
 
 ## Tech stack
 
@@ -322,36 +361,48 @@ round-trip-safe, with a shared parser core**. Versions are what the manifests ac
 ```
 .
 ├── client/                     Vite + React 18 + TypeScript (port 5173)
-│   └── src/
-│       ├── state/              Zustand store + useHistory<T> undo hook
-│       └── ui/                 Editor components
+│   ├── src/
+│   │   ├── state/              Zustand store + useHistory<T> undo hook
+│   │   └── ui/                 Editor components
+│   └── tests/                  Playwright specs + the committed
+│                               fixtures/mini-config project
 ├── server/                     Fastify 5 API (port 5174)
 │   ├── src/
 │   │   ├── cht-conf/           Error patterns, dry-run driver, fixtures
 │   │   ├── routes/             project / forms / hierarchy / tasks /
-│   │   │                       contact-summary / templates / cht-conf
+│   │   │                       contact-summary / templates / cht-conf /
+│   │   │                       fhirMapping / dictionaries / deploy
 │   │   └── state.ts            ~/.cht-ui-builder/state.json persistence
-│   └── templates/              Starter projects (blank, malaria)
+│   └── templates/              Starter projects (cht-default, malaria,
+│                               blank, empty)
 ├── shared/                     Parsers, serializers, types (the core)
 │   └── src/
 │       ├── xlsform/            parse, serialize, types, dependencies,
 │       │                       relevantParser, calculationBuilder,
 │       │                       renameList, diff
+│       ├── tasks/              jsParser, contactSummaryParser,
+│       │                       appliesIfParser, eventsParser, ...
+│       ├── contactSummary/     context-key discovery, cards parser
+│       ├── conditionBuilder/   rule-builder state machine
+│       ├── preflight/          pre-save validation rules
+│       ├── fhir/               mapping codec, dictionaries, starter packs
 │       ├── hierarchy/          hierarchyOrder (topological derivation)
-│       └── tasks/              jsParser, contactSummaryParser,
-│                               appliesIfParser, eventsParser, ...
-└── scripts/smoke-parser.mjs    Round-trip smoke test
+│       └── translations/       .properties parse/edit
+├── docs/                       Plans, handoffs, reviews, testing-map.md
+├── .github/workflows/ci.yml    build + test + pyxform oracle + e2e
+└── scripts/                    smoke-parser, corpus-sweep,
+                                validate-generated-forms, ...
 ```
 
 ## Commands
 
 ```sh
-pnpm install                            # Restore deps
-pnpm dev                                # Run client + server in parallel
+pnpm install                            # Restore deps (pnpm only — see Quick start)
+pnpm dev                                # client + server + shared tsc --watch
 pnpm build                              # Build all workspaces
-pnpm typecheck                          # tsc -b across all workspaces
-pnpm lint                               # eslint, zero-warnings enforced
-pnpm format                             # prettier --write
+pnpm typecheck                          # typecheck every workspace
+pnpm lint                               # eslint --max-warnings=0  (see note)
+pnpm format                             # prettier --write        (see note)
 
 # Shared-only iteration:
 pnpm --filter @cht-ui/shared build      # or `dev` for tsc --watch
@@ -360,10 +411,28 @@ pnpm --filter @cht-ui/shared test       # node --test over dist/**/*.test.js
 # Server-only iteration:
 pnpm --filter @cht-ui/server build
 pnpm --filter @cht-ui/server test
+
+# Browser-driven e2e (needs shared + server built first):
+pnpm --filter @cht-ui/client test:e2e
+pnpm --filter @cht-ui/client test:e2e:ui
 ```
 
 The Shared workspace must be built before client/server typecheck resolves
 its workspace import.
+
+> **`pnpm lint` is currently red** — ~115 problems, almost all pre-existing
+> `no-undef` false positives from an eslint config that declares no browser
+> globals, plus dead `eslint-disable` directives. CI runs build, typecheck,
+> tests, the pyxform oracle and e2e, but the lint step is commented out
+> pending a cleanup PR — see the note in
+> [.github/workflows/ci.yml](.github/workflows/ci.yml). Treat the
+> zero-warnings gate as the intent, not the current state.
+>
+> **`pnpm format` rewrites ~235 files** — the tree has never been fully
+> Prettier-formatted. `.prettierignore` keeps it away from the lockfile,
+> vendored dictionaries, and the CHT-shaped fixture/template projects (which
+> must stay byte-identical to what `cht-conf` writes), but a bulk format is
+> still its own commit. Format the files you touch, not the repo.
 
 ## Contributing
 

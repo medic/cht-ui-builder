@@ -1,0 +1,22 @@
+# Generated / vendored — never reformat.
+pnpm-lock.yaml
+**/pnpm-lock.yaml
+dist/
+**/dist/
+node_modules/
+client/playwright-report/
+client/test-results/
+
+# Harness + agent config, edited by tooling that owns its own formatting.
+.claude/
+
+# Vendored terminology dictionaries and FHIR fixtures are byte-pinned by tests
+# (shared/src/fhir/dictionaries.test.ts asserts on the shipped bytes).
+shared/src/fhir/dictionaries/
+shared/src/fhir/starter-packs/
+shared/src/**/__fixtures__/
+
+# CHT-shaped fixture project — must stay byte-identical to what cht-conf writes,
+# which is not Prettier's style. Already excluded from eslint for the same reason.
+client/tests/fixtures/
+server/templates/
