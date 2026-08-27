@@ -7,7 +7,7 @@ Planner-locked, developer-ready. Separate from condition-builder.md (calculation
 # Plan: Calculation / formula builder — value-producing `calculation` column
 
 **Version:** v0.2 — 2026-06-15 · **Status:** PLANNER-LOCKED, developer-ready.
-**Written to:** `d:\ui-builder-for-cht\docs\plans\calculation-builder.md` (full plan; this is the summary).
+**Written to:** `d:\cht-ui-builder\docs\plans\calculation-builder.md` (full plan; this is the summary).
 
 > All line anchors below were re-pinned against current HEAD (commit `2770f2a`). Because `FormEditor.tsx` and `conditionReducer.ts` are actively churning on the parallel condition-builder branch, **anchors are paired with the stable symbol name — grep the symbol if the number has drifted.** All corpus numbers were measured directly against `server/templates/cht-default/forms/app/*.xlsx` via compiled `shared/dist` on 2026-06-15 (see §6).
 

@@ -124,13 +124,13 @@ Result: the union is genuinely additive; the 5 consumers and all 85 shared tests
 
 ### Slice 1 — Choices fix
 
-**`server/src/routes/project.ts`** (modify) — verified path `d:/ui-builder-for-cht/server/src/routes/project.ts`.
+**`server/src/routes/project.ts`** (modify) — verified path `d:/cht-ui-builder/server/src/routes/project.ts`.
 - Add `contactFieldChoices: Record<string, string[]>` to the `ProjectInfo` interface (currently lines 11-19, **7 fields: `path`, `name` (2 strings) + 5 booleans `hasAppSettings`/`hasAppForms`/`hasContactForms`/`hasTasks`/`hasContactSummary`**; no choices field).
 - In `describeProject` (lines 39-49), after the existing flag computation, scan `forms/contact/*.xlsx`: `readdir`, filter `.xlsx`, parse each with `parseXlsForm` (import it as `forms.ts:172` does), collect rows whose `type` matches `/^(select_one|select_multiple)\s+(\S+)/i`, resolve choice values from the form's own `choices` sheet keyed by `list_name`, build the map keyed by row `name`. **Parallelize with `Promise.all`** (mirror the `forms.ts` listing pattern). On collision across forms, last-write-wins (documented limitation; no warning this release).
 - Attach to the returned payload. Both `/api/project` (line 60) and `/api/project/open` (line 85) call `describeProject`, so both paths get it for free.
 - **~45 LOC.** Read-only; zero XLSForm writes.
 
-**`client/src/state/store.ts`** (modify) — verified path `d:/ui-builder-for-cht/client/src/state/store.ts`, `ProjectInfo` at lines 23-31.
+**`client/src/state/store.ts`** (modify) — verified path `d:/cht-ui-builder/client/src/state/store.ts`, `ProjectInfo` at lines 23-31.
 - Add `contactFieldChoices: Record<string, string[]>` to the `ProjectInfo` interface. **~1 LOC.**
 - No `client/src/api.ts` change needed: `client/src/api.ts:6` imports `ProjectInfo` from store and reuses it for both `getProject` (lines 39-40) and `openProject` (lines 42-46). Extending the one interface flows through both. **(Path note for the developer: the API module is `client/src/api.ts`, NOT `client/src/state/api.ts`; `store.ts` edited in the same commit lives in `client/src/state/`.)**
 
@@ -181,7 +181,7 @@ Result: the union is genuinely additive; the 5 consumers and all 85 shared tests
 
 **Client reducer + unit tests** (new file, e.g. `client/src/ui/conditionReducer.ts` + `conditionReducer.test.ts`). Reducer actions: `commitClause`, `popClause`, `startOver`, `insertAll`, `enterGroupMode`, `exitGroupMode`, `setDraft`. **~80 LOC reducer + ~80 LOC tests.**
 
-**`client/tests/setup.ts`** (modify) + new fixture (Lorena blocker). `PROJECT_PATH` currently hardcodes `W:\ui-builder-for-cht\config-gandaki\cht-config` (line 8) which doesn't exist on a fresh clone. Commit a minimal fixture project at `client/tests/fixtures/mini-config` (tiny `forms/app/` + `forms/contact/` with at least a `select_one sex` field whose choices are `male/female/other` in a contact form), and **default `PLAYWRIGHT_PROJECT_PATH` to the committed fixture path resolved relative to the repo** so NO manual env export is needed on a fresh clone. **Slice 1 needs this** (its e2e asserts the populated dropdown).
+**`client/tests/setup.ts`** (modify) + new fixture (Lorena blocker). `PROJECT_PATH` currently hardcodes `W:\medic\config-gandaki\cht-config` (line 8) which doesn't exist on a fresh clone. Commit a minimal fixture project at `client/tests/fixtures/mini-config` (tiny `forms/app/` + `forms/contact/` with at least a `select_one sex` field whose choices are `male/female/other` in a contact form), and **default `PLAYWRIGHT_PROJECT_PATH` to the committed fixture path resolved relative to the repo** so NO manual env export is needed on a fresh clone. **Slice 1 needs this** (its e2e asserts the populated dropdown).
 
 **`client/tests/condition-builder.spec.ts`** (new). Slice 1: dropdown-populated test. Slice 2: happy-path, cancel-safety (XLSForm-serializer-level byte identity), group affordance. **~120 LOC.**
 

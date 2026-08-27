@@ -83,7 +83,7 @@ the caveat) and the general backlog is parked below. 2026-08-06.
 > least this item.
 >
 > **✅ OWNERSHIP AGREED (planner + dev + QA, independently, 2026-08-11).** Everything is inside
-> **`ui-builder-for-cht`** — nothing needs a change to cht-core.
+> **`cht-ui-builder`** — nothing needs a change to cht-core.
 >
 > | # | Issue | Owning layer | No-code capability gap? |
 > |---|---|---|---|

@@ -54,7 +54,7 @@ Note `pnpm test` only exists in `shared` (uses Node's built-in test runner over
 This repo does **not** contain any CHT config. The app operates on an external
 folder whose absolute path you enter on the first screen. The README references
 sibling folders that exist only on the original machine, e.g.
-`W:\ui-builder-for-cht\config-gandaki\cht-config`. **On a fresh machine these
+`W:\medic\config-gandaki\cht-config`. **On a fresh machine these
 won't exist** — clone or obtain a cht-conf project folder before expecting the
 editor (or the smoke test) to do anything. The last-opened path is remembered in
 `~/.cht-ui-builder/state.json`.

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Playwright config for ui-builder-for-cht e2e tests.
+ * Playwright config for cht-ui-builder e2e tests.
  *
  * The suite targets Vite at http://localhost:5173 (proxied to Fastify on
  * :5174). The `webServer` array boots both automatically so the suite is

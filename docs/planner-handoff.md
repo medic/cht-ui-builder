@@ -36,20 +36,20 @@ These three form the **Requirements/Validation Triad** — every
 substantive UI change runs through all three before being called done.
 This is the squad's change-review pattern, not optional.
 
-- `~/.claude/projects/d--ui-builder-for-cht/memory/persona_bhishan.md`
+- `~/.claude/projects/d--cht-ui-builder/memory/persona_bhishan.md`
   — Bhishan KC, Health Program Designer (DHO Gandaki, Excel/Kobo-fluent).
   **Cold-start test:** can he build a complete form without a developer?
   Cold-start abandonment is the signature MVP failure mode.
-- `~/.claude/projects/d--ui-builder-for-cht/memory/persona_lal_bahadur.md`
+- `~/.claude/projects/d--cht-ui-builder/memory/persona_lal_bahadur.md`
   — Lal Bahadur, HCD/UX Lead. **Dual role:** (a) requirements gathering
   with MOH + CHWs, (b) severity-tagged UX punch list (blocking / polish
   / nit).
-- `~/.claude/projects/d--ui-builder-for-cht/memory/persona_anita.md`
+- `~/.claude/projects/d--cht-ui-builder/memory/persona_anita.md`
   — Anita Tamang, QA Engineer. **Spec coverage:** fixtures, round-trip
   tests, CI, deterministic replay. Validates output correctness.
 
 The triad pattern itself is captured in
-`~/.claude/projects/d--ui-builder-for-cht/memory/personas_triad.md`.
+`~/.claude/projects/d--cht-ui-builder/memory/personas_triad.md`.
 
 ### Target user types (design *for*, don't spawn)
 
@@ -57,14 +57,14 @@ These three have defined capabilities and constraints but are not
 dogfood agents. Name them when scoping who a feature is for, but don't
 spawn agents in-character.
 
-- `~/.claude/projects/d--ui-builder-for-cht/memory/persona_app_developer.md`
+- `~/.claude/projects/d--cht-ui-builder/memory/persona_app_developer.md`
   — Technical escape hatch + deployment owner. Strategic goal: reduce
   routine-config bottleneck. Raw-text fallbacks on every visual builder
   are *his* surface.
-- `~/.claude/projects/d--ui-builder-for-cht/memory/persona_moh_reviewer.md`
+- `~/.claude/projects/d--cht-ui-builder/memory/persona_moh_reviewer.md`
   — Sign-off only. Read-only Decisions view is his surface. Auditable
   sign-off trail is a v0.1 gap.
-- `~/.claude/projects/d--ui-builder-for-cht/memory/persona_supervisor.md`
+- `~/.claude/projects/d--cht-ui-builder/memory/persona_supervisor.md`
   — User management + hierarchy + deployment-status visibility.
   Underserved in v0.1 — user CRUD, audit log, and deploy history are
   all missing.
@@ -163,5 +163,5 @@ template.
 
 ## Working directory
 
-`d:\ui-builder-for-cht` on Windows. Use PowerShell, not WSL — earlier
+`d:\cht-ui-builder` on Windows. Use PowerShell, not WSL — earlier
 sessions had to be corrected on this. pnpm@11.2.2, Node ≥22.13.
