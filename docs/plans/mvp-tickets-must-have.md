@@ -9,11 +9,11 @@ build specification: one ticket per feature, paste-ready into an issue tracker.
 **Source:** *No Code CHT Configuration — Requirements & Design*, using its **Feature Importance**
 column.
 
-| Importance | Features | Tickets |
+| Priority | Scope | Tickets |
 |---|---|---|
-| **Must have** | F1, F2, F3, F4, F5, F6, F9, F14, F15 | T1–T9 |
-| **Must start** | F16 | T10 |
-| Stretch | F7, F8, F10, F11, F12, F13, F17 | not ticketed |
+| **Must have** | Form editor · properties & translations · new form + persona · hierarchy · contacts · task creation · safety tests · round-trip safety · complex logic | **T1–T9** |
+| **Must start** | AI-assisted authoring | **T10** |
+| Stretch — not ticketed | Templates & reusable blocks · rendered preview · versioning · governance & sign-off · contact summary · standard codes · constrained visual editor | — |
 
 Each ticket states why the feature exists, the scope as a checklist, explicit non-goals, testable
 acceptance criteria, and dependencies. Sizes are S / M / L relative to each other, not calendar
@@ -30,7 +30,7 @@ suggestions; a design that ignores them produces output CHT rejects or silently 
 
 ---
 
-## T1 · F1 — Form editor: the restricted safe edit subset
+## T1 — Form editor: the restricted safe edit subset
 
 **Importance:** Must have · **Size:** L · **Depends on:** nothing
 
@@ -59,7 +59,7 @@ this surface exists.
 - [ ] ⚠ **Refuse to edit variable names**, with an explanation. Renaming a field mid-collection
       breaks the meaning of every record already gathered under the old name.
 
-**Not in scope.** Branching-flow authoring beyond per-question conditions (see F15). Editing a form
+**Not in scope.** Branching-flow authoring beyond per-question conditions (see T9). Editing a form
 that cannot be represented in the editor's model — such a form opens read-mostly.
 
 **Acceptance.**
@@ -71,7 +71,7 @@ that cannot be represented in the editor's model — such a form opens read-most
 
 ---
 
-## T2 · F2 — Edit beyond the sheet: properties, resources, translations
+## T2 — Edit beyond the sheet: properties, resources, translations
 
 **Importance:** Must have · **Size:** M · **Depends on:** the resources editor precedes the icon
 picker
@@ -111,7 +111,7 @@ files must stay consistent with each other.
 
 ---
 
-## T3 · F3 — Add a simple new form, and assign it to a persona
+## T3 — Add a simple new form, and assign it to a persona
 
 **Importance:** Must have · **Size:** M · **Depends on:** input declaration precedes the
 contact-field picker
@@ -148,7 +148,7 @@ requires contact-summary wiring. Branching or multi-page flows.
 
 ---
 
-## T4 · F4 — Basic hierarchy
+## T4 — Basic hierarchy
 
 **Importance:** Must have · **Size:** M · **Depends on:** nothing
 
@@ -179,7 +179,7 @@ explicitly out of MVP.
 
 ---
 
-## T5 · F5 — Basic contacts
+## T5 — Basic contacts
 
 **Importance:** Must have · **Size:** M · **Depends on:** T4
 
@@ -209,7 +209,7 @@ The design doc names household, household member and CHW as the baseline.
 
 ---
 
-## T6 · F6 — Basic task creation
+## T6 — Basic task creation
 
 **Importance:** Must have · **Size:** L · **Depends on:** T2 for the title; T8 for safe emission
 
@@ -257,7 +257,7 @@ MVP.
 
 ---
 
-## T7 · F9 — Safety tests: synthetic patients
+## T7 — Safety tests: synthetic patients
 
 **Importance:** Must have · **Size:** L · **Depends on:** nothing
 
@@ -292,7 +292,7 @@ defensible.
 
 ---
 
-## T8 · F14 — Round-trip safety and determinism
+## T8 — Round-trip safety and determinism
 
 **Importance:** Must have · **Size:** L · **Depends on:** nothing — but everything depends on it
 
@@ -339,7 +339,7 @@ design doc rules this out; such forms open read-mostly.
 
 ---
 
-## T9 · F15 — Complex logic: calculation, relevance, constraint
+## T9 — Complex logic: calculation, relevance, constraint
 
 **Importance:** Must have · **Size:** L · **Depends on:** T1, T8
 
@@ -375,7 +375,7 @@ instead.
 
 ---
 
-## T10 · F16 — AI-assisted authoring (must **start**)
+## T10 — AI-assisted authoring (must **start**)
 
 **Importance:** Must start · **Size:** L — spike first · **Depends on:** T1 for the target format
 
