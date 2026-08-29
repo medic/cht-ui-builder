@@ -11,6 +11,23 @@ writes a project folder on disk so the same folder stays deployable with
 config, change it through the UI, write it back without disturbing anything the
 UI doesn't explicitly own.
 
+## Where this code lives
+
+The canonical repository is **`medic/cht-ui-builder`** — <https://github.com/medic/cht-ui-builder>.
+That is the `origin` remote and what `master` tracks. Push there.
+
+Two things that look like mistakes but are not:
+
+- The **local folder is `W:\medic\ui-builder-for-cht`** while the **project is named
+  `cht-ui-builder`**. The folder name is historical. Do not rename it, and do not
+  "correct" the folder name where it appears in a path — several tests and docs
+  hardcode the real absolute path, and rewriting those breaks them.
+- A `personal` remote (`PrjShrestha/ui-builder-for-cht`) still exists as the pre-move
+  origin. Leave it; don't push to it.
+
+Several sessions share this one working tree, so git state is common to all of
+them. Assume another session may have committed since you last looked.
+
 ## Stack & layout
 
 pnpm monorepo (`pnpm@11.2.2`, Node ≥ 20). Three workspaces:
