@@ -863,7 +863,11 @@ button.danger:hover:not(:disabled) { background: #991b1b; }
 
 /* ===================== Quick hierarchy creator ===================== */
 /* docs/plans/quick-hierarchy-creator.md — empty-template quick-start. */
-.qhc-modal { max-width: 640px; width: 92vw; }
+/* Cap the height and scroll internally, as the other modals do (90vh / 88vh).
+   Without this the wizard grows past a 720px-tall viewport and its primary
+   action — "Set up my hierarchy" — sits below the fold with no way to reach
+   it: the page behind does not scroll while the modal is open. */
+.qhc-modal { max-width: 640px; width: 92vw; max-height: 90vh; overflow-y: auto; }
 .qhc-body { padding: 12px 20px 16px; display: flex; flex-direction: column; gap: 12px; }
 .qhc-intro { margin: 0; line-height: 1.45; }
 .qhc-stepper-row {

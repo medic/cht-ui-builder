@@ -191,4 +191,23 @@ await writeFile(
   ) + '\n',
 );
 
+// forms/app/pregnancy.properties.json — a real cht-conf project carries a
+// sidecar per app form, and FormEditor only renders the Properties tab when
+// one is present (`properties !== null`). Without this the tab is unreachable,
+// so the form-context specs have nothing to drive.
+await writeFile(
+  join(root, 'forms', 'app', 'pregnancy.properties.json'),
+  JSON.stringify(
+    {
+      title: [{ locale: 'en', content: 'Pregnancy registration' }],
+      // Left unticked and expression-free on purpose: the context specs tick
+      // "Available on people" themselves and assert on the resulting filter.
+      context: { person: false, place: false },
+      icon: 'icon-pregnancy',
+    },
+    null,
+    2,
+  ) + '\n',
+);
+
 console.log('Wrote mini-config fixture to', root);

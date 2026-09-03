@@ -1,0 +1,13 @@
+{
+  "title": [
+    {
+      "locale": "en",
+      "content": "Pregnancy registration"
+    }
+  ],
+  "context": {
+    "person": false,
+    "place": false
+  },
+  "icon": "icon-pregnancy"
+}

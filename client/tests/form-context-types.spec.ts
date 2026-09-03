@@ -49,8 +49,11 @@ async function openTempPregnancy(
   await expect(page.getByText(path.basename(tmp)).first()).toBeVisible();
   await page.locator('.nav-item', { hasText: 'Forms' }).click();
   await page.getByRole('button', { name: 'pregnancy.xlsx' }).click();
-  // Navigate to the Properties tab.
-  await page.getByRole('tab', { name: /Properties/i }).click();
+  // Navigate to the Properties tab. The tab strip is plain <button>s in
+  // `.tabs` — there is no `role="tab"` in FormEditor — and the Properties tab
+  // only renders when the form has a `.properties.json` sidecar, which the
+  // fixture now ships.
+  await page.locator('.tabs').getByRole('button', { name: 'Properties' }).click();
   await expect(page.locator('.properties-editor')).toBeVisible();
   return tmp;
 }
@@ -65,7 +68,7 @@ test('#3 A — dropdown lists real project types and emits contact.contact_type'
     // bound to the first project type (mini-config: `district_hospital`).
     await page
       .locator('.context-builder')
-      .getByRole('button', { name: /\+ contact type/i })
+      .getByRole('button', { name: '+ contact type', exact: true })
       .click();
 
     // The dropdown options should include mini-config's real types
@@ -122,7 +125,7 @@ test('#3 C — "Available on people" filters the dropdown to person types only',
     // Then add a contact-type rule.
     await page
       .locator('.context-builder')
-      .getByRole('button', { name: /\+ contact type/i })
+      .getByRole('button', { name: '+ contact type', exact: true })
       .click();
     const select = page.locator('.rule-row select').first();
     // Person type present; place-only types should be filtered out.

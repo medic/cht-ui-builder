@@ -66,8 +66,10 @@ test('Bug B — bare `string` row in a generated contact form classifies as Text
     const genModal = page.locator('.lineage-builder-modal');
     await expect(genModal).toBeVisible();
     await genModal.getByRole('button', { name: /Generate \d+ file/ }).click();
-    await expect(genModal.getByText(/✓ Written:/)).toBeVisible({ timeout: 30_000 });
-    await genModal.getByRole('button', { name: 'Close' }).click();
+    await expect(genModal.getByText(/✓ Written \(new\):/)).toBeVisible({ timeout: 30_000 });
+    // Two buttons carry the name "Close": the header's aria-labelled × and
+    // the footer action. `.last()` is the footer one.
+    await genModal.getByRole('button', { name: 'Close' }).last().click();
 
     // 4. Open the generated person-create form.
     await page.locator('.nav-item', { hasText: 'Forms' }).click();
@@ -108,8 +110,10 @@ test('Bug B regression — a real `select-contact` row STILL classifies as "Sele
     await modal.getByRole('button', { name: 'Generate forms' }).click();
     const genModal = page.locator('.lineage-builder-modal');
     await genModal.getByRole('button', { name: /Generate \d+ file/ }).click();
-    await expect(genModal.getByText(/✓ Written:/)).toBeVisible({ timeout: 30_000 });
-    await genModal.getByRole('button', { name: 'Close' }).click();
+    await expect(genModal.getByText(/✓ Written \(new\):/)).toBeVisible({ timeout: 30_000 });
+    // Two buttons carry the name "Close": the header's aria-labelled × and
+    // the footer action. `.last()` is the footer one.
+    await genModal.getByRole('button', { name: 'Close' }).last().click();
 
     await page.locator('.nav-item', { hasText: 'Forms' }).click();
     await page.getByRole('button', { name: /person-create\.xlsx/ }).click();
