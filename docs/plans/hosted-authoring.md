@@ -1,13 +1,35 @@
 <!--
 Plan for hosted, multi-user, no-install CHT authoring ("rung 1"). Written from
 measurements against the codebase and the four real configs on 2026-08-20.
-Decisions in §4 were made by the PO on 2026-08-20. Nothing in this plan has been
-built.
+Decisions in §4 were made by the PO on 2026-08-20. Built on 2026-09-04 — see §0.
 -->
 
 # Hosted CHT authoring
 
-**Status:** PLAN — decisions locked, nothing built · **Branch:** `feat/hosted-authoring`
+**Status:** BUILT (rung 1) · **Branch:** `feat/hosted-authoring` · **Run it:** `docs/hosted-deploy.md`
+
+## 0. What was built, and where it departs from the plan below
+
+Everything in §11 landed, in order. Verified by `scripts/hosted-acceptance.mjs`
+(43 assertions, both modes, in CI) and by running `validate-generated-forms` and
+`validate-templates` inside the image.
+
+| plan item | landed as |
+|---|---|
+| §8.1 Dockerfile | `Dockerfile` + `.dockerignore`: node 22, python 3.11 + pyxform 4.5.0 in a venv, git; builds shared/server/client; serves the client from the same origin (`SERVE_CLIENT=1`). Toolchain proven inside the image. |
+| §9 `cht-default` / `moment` | Two-part fix. The template now ships a `package.json` declaring `moment` (as cht-core's own config does). The image also installs `moment` at `/node_modules`, because webpack resolves bare imports by walking `node_modules` **up** from the project folder, so every project under `/data` resolves it with no `npm install` and nothing added to the user's project. cht-conf does **not** ship moment itself — that assumption in §9 was wrong. |
+| §9 template compile guard | `scripts/validate-templates.mjs` + CI job `templates-validate`: copies each template (dotfiles included), `npm install`s if it has a package.json, runs compile + convert + validate for app and contact forms. All four pass. |
+| §8.2 Auth | `server/src/auth.ts`: email + password, scrypt hashes, bearer tokens (sha256 stored), 30-day sessions, JSON files under `DATA_ROOT/auth`. `onRequest` hook stamps `req.userId`; the SSE stream route alone also accepts `?token=` (EventSource cannot set headers — the §8.2 gotcha). Desktop mode: one implicit `local` user, no sign-in. |
+| §6.1 / §8.3 one commit | `state.ts` rewritten around a **per-user registry** (`registry.json`) and `x-project-id` on every request (`?project=` for SSE). `getProjectPath`/`setProjectPath` are gone; `resolveInsideProject(req, rel)`, `projectRootFor(req)`, `getDeployConfig(userId)` thread through all 31 sites. Desktop compatibility: the old `state.json` is migrated into the registry on first load, and a request with **no** id falls back to the last-opened project in desktop mode only — which keeps "reopen the browser, land in your project" and the Playwright suite's `POST /api/project/open` working. |
+| §6.2 delete `browse` | **Departure:** moved to `routes/browse.ts` and registered **only when `CHT_UI_MODE=desktop`**, rather than deleted. The desktop app keeps its folder browser (§4 "the desktop app stays"); the hosted surface has no browse routes at all — not jailed, absent. |
+| §6.3 layout | `DATA_ROOT/users/<userId>/projects/<slug>` (plus `users/<userId>/registry.json` and `auth/`). One extra level vs. the plan so auth files cannot collide with a user directory. In hosted mode every resolution additionally refuses an entry outside the user's projects dir. |
+| §8.4 registry | `GET /api/projects`, `POST /api/projects/open {id}`, `PATCH`/`DELETE /api/projects/:id` (`?files=1` deletes from disk only under the user's projects dir), `POST /api/templates/create {template, name}`. `POST /api/project/open {path}` remains, desktop-only. |
+| §8.5 import / export | `routes/transfer.ts`: `import-git` (shallow clone, size budget, project root found up to two levels down — nssd's `chis/`), `export-git` (add, commit, push `HEAD:refs/heads/<branch>`), `import-zip` (raw body, `adm-zip`, zip-slip refusal, common-root stripping, §6.5 exclusions), `export.zip`. Zip needed no multipart parser: the file is the request body. |
+| §8.6 client base URL | `VITE_API_BASE` read once in `api.ts`, which also adds `Authorization` and `x-project-id` to every call. Project id lives in **sessionStorage** — per tab — so two tabs edit two projects. |
+| §12 acceptance | `scripts/hosted-acceptance.mjs` (API level, spawns the server in both modes) in CI. The browser-level Playwright leg is not written yet; the desktop specs still pass through the unchanged `#project-path` path. |
+| client | `SignIn`, a project list on `ProjectPicker` (open / delete / start blank / template / import git / import zip; the path input stays in desktop mode), the wizard asks for a name instead of a folder when hosted, `ProjectTransfer` on the overview (download zip; push branch for git imports). |
+
+Still true from §10: last-write-wins for two people on one config; one API instance per volume; no deploy credentials reach the hosted server (rung 1 has no upload).
 
 ## 1. Why
 

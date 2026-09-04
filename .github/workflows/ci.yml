@@ -38,6 +38,17 @@ jobs:
       - name: Typecheck all workspaces
         run: pnpm typecheck
 
+      # Hosted, multi-user authoring (docs/plans/hosted-authoring.md §12): two
+      # users, per-user registry, project ids on every request, zip import /
+      # export, zip-slip refusal, and that user A can reach none of user B's
+      # project by any route. Spawns the built server in hosted AND desktop
+      # mode against throwaway data dirs; no python needed.
+      - name: Build server
+        run: pnpm --filter @cht-ui/server build
+
+      - name: Hosted-authoring acceptance (API level, both modes)
+        run: node scripts/hosted-acceptance.mjs
+
       # NOTE: `pnpm lint` is deferred from CI pending a separate cleanup PR.
       # The repo's eslint.config.js declares Node globals only for *.ts/*.tsx
       # and lacks browser globals for the client/ workspace and Node globals
@@ -94,6 +105,41 @@ jobs:
       - name: Validate tool-generated forms with cht-conf + pyxform
         run: node scripts/validate-generated-forms.mjs
 
+  templates-validate:
+    # Every starter template must be deployable AS SHIPPED. A standing PO
+    # directive says each template ships minimal-valid versions of every
+    # cht-conf-required file, and nothing checked it: cht-default did not
+    # compile (its extras require moment with nothing to resolve it) until
+    # docs/plans/hosted-authoring.md §9 found it by hand. This copies each
+    # template (dotfiles included), installs its declared deps if it ships a
+    # package.json, and runs compile + convert + validate with the real
+    # cht-conf + pyxform. The same script runs inside the Dockerfile image.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pyxform
+        run: python -m pip install --upgrade pyxform
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate every template with cht-conf + pyxform
+        run: node scripts/validate-templates.mjs
+
   e2e:
     # Browser-driven Playwright suite against the committed mini-config fixture.
     # playwright.config.ts boots a non-watch API server (server `start`) + Vite
@@ -143,6 +189,18 @@ jobs:
         env:
           ANC_OUTPUT_DIR: ${{ runner.temp }}/anc-build
         run: pnpm --filter @cht-ui/client exec playwright test condition-builder.spec.ts form-editing.spec.ts fhir-mapping.spec.ts form-data-passing.spec.ts quick-hierarchy.spec.ts contact-form-tile-classification.spec.ts form-context-types.spec.ts hierarchy-ux-polish.spec.ts poc-build.spec.ts anc-build-deploy.spec.ts geriatric-blockers.spec.ts pick-preexisting-values.spec.ts
+
+      # Hosted, multi-user authoring at the browser level (docs/plans/
+      # hosted-authoring.md §12): sign up, start blank, land in the project;
+      # two tabs hold two projects; another user sees nothing; sign out.
+      # Its own config boots the server in CHT_UI_MODE=hosted against a
+      # throwaway DATA_ROOT and serves the BUILT client from the same origin —
+      # the exact shape the Dockerfile ships — so the client must be built.
+      - name: Build client (served by the hosted server)
+        run: pnpm --filter @cht-ui/client build
+
+      - name: Run hosted-mode e2e (sign-up, start blank, two tabs, isolation)
+        run: pnpm --filter @cht-ui/client exec playwright test -c playwright.hosted.config.ts
 
       - name: Upload Playwright report on failure
         if: failure()
