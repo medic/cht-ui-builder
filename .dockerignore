@@ -1,0 +1,15 @@
+.git
+node_modules
+**/node_modules
+**/dist
+**/tsconfig.tsbuildinfo
+client/playwright-report
+client/test-results
+client/demo
+client/.vite
+_tmp_*
+*.log
+.env
+.env.local
+.claude
+.playwright-mcp

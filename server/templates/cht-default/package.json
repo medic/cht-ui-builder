@@ -1,0 +1,9 @@
+{
+  "name": "cht-default-config",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CHT baseline configuration, imported from cht-core/config/default. contact-summary-extras.js, contact-summary.templated.js and tasks-extras.js require('moment'); run `npm install` here before `cht compile-app-settings` on a machine that does not provide it.",
+  "dependencies": {
+    "moment": "^2.30.1"
+  }
+}
