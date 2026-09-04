@@ -22,6 +22,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  */
 export default defineConfig({
   testDir: './tests',
+  // The hosted-mode acceptance needs its own server (CHT_UI_MODE=hosted,
+  // throwaway DATA_ROOT) — see playwright.hosted.config.ts.
+  testIgnore: /hosted-authoring\.spec\.ts$/,
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,

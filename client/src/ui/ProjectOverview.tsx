@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useApp } from '../state/store.js';
+import { ProjectTransfer } from './ProjectTransfer.js';
 
 export function ProjectOverview() {
   const project = useApp((s) => s.project);
@@ -42,7 +43,7 @@ export function ProjectOverview() {
   return (
     <div className="overview">
       <h1>{project.name}</h1>
-      <code className="path">{project.path}</code>
+      {project.path && <code className="path">{project.path}</code>}
       <p>This is a cht-conf project. Pick a section to start editing.</p>
 
       {/* Onboarding nudge — only shows on a fresh / hierarchy-empty
@@ -97,6 +98,8 @@ export function ProjectOverview() {
           onClick={() => setView({ kind: 'contact-summary' })}
         />
       </div>
+
+      <ProjectTransfer />
     </div>
   );
 }

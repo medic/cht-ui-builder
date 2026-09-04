@@ -32,9 +32,21 @@ export type View =
   | { kind: 'standard-codes' }
   | { kind: 'translations' };
 
+export type ServerMode = 'desktop' | 'hosted';
+
+/** Who the server thinks we are, and which mode it runs in. */
+export interface SessionState {
+  mode: ServerMode;
+  user: { id: string; email: string | null } | null;
+}
+
 export interface ProjectInfo {
+  /** Registry id; the api layer sends it as x-project-id on every request. */
+  id: string;
+  /** Empty in hosted mode — no filesystem path crosses the wire. */
   path: string;
   name: string;
+  source: 'local' | 'template' | 'import-git' | 'import-zip';
   hasAppSettings: boolean;
   hasAppForms: boolean;
   hasContactForms: boolean;
@@ -58,6 +70,8 @@ export interface FormListEntry {
 }
 
 interface AppState {
+  /** null until /api/auth/me has answered. */
+  session: SessionState | null;
   project: ProjectInfo | null;
   view: View;
   forms: FormListEntry[];
@@ -68,6 +82,7 @@ interface AppState {
   /** Last error message, shown in the chrome. */
   lastError: string | null;
 
+  setSession(s: SessionState | null): void;
   setProject(p: ProjectInfo | null): void;
   setView(v: View): void;
   setForms(f: FormListEntry[]): void;
@@ -77,6 +92,7 @@ interface AppState {
 }
 
 export const useApp = create<AppState>((set) => ({
+  session: null,
   project: null,
   view: { kind: 'no-project' },
   forms: [],
@@ -84,6 +100,7 @@ export const useApp = create<AppState>((set) => ({
   saving: {},
   lastError: null,
 
+  setSession: (s) => set({ session: s }),
   setProject: (p) => set({ project: p, view: p ? { kind: 'project-overview' } : { kind: 'no-project' } }),
   setView: (v) => set({ view: v }),
   setForms: (f) => set({ forms: f }),

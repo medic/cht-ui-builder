@@ -56,12 +56,12 @@ async function writeJson(p: string, value: unknown): Promise<void> {
 }
 
 export async function registerHierarchyRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/hierarchy', async (_req, reply) => {
+  app.get('/api/hierarchy', async (req, reply) => {
     let settingsPath;
     let placeTypesPath;
     try {
-      settingsPath = await resolveInsideProject(path.join('app_settings', 'base_settings.json'));
-      placeTypesPath = await resolveInsideProject(path.join('forms', 'contact', 'place-types.json'));
+      settingsPath = await resolveInsideProject(req, path.join('app_settings', 'base_settings.json'));
+      placeTypesPath = await resolveInsideProject(req, path.join('forms', 'contact', 'place-types.json'));
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
     }
@@ -84,8 +84,8 @@ export async function registerHierarchyRoutes(app: FastifyInstance): Promise<voi
     let settingsPath;
     let placeTypesPath;
     try {
-      settingsPath = await resolveInsideProject(path.join('app_settings', 'base_settings.json'));
-      placeTypesPath = await resolveInsideProject(path.join('forms', 'contact', 'place-types.json'));
+      settingsPath = await resolveInsideProject(req, path.join('app_settings', 'base_settings.json'));
+      placeTypesPath = await resolveInsideProject(req, path.join('forms', 'contact', 'place-types.json'));
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
     }

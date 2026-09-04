@@ -5,12 +5,22 @@
  * Templates live in server/templates/<name>/ and are bundled with the
  * server. They're plain files — no token substitution at this stage —
  * because cht-conf doesn't care about a project name beyond the folder
- * basename. The wizard sets the path; we copy.
+ * basename.
+ *
+ * Where the copy lands depends on the mode (config.ts): hosted projects are
+ * always created under the user's projects dir from a display name; desktop
+ * callers name the folder. Either way the new project is registered and its
+ * id returned, so the client opens it by id like any other.
+ *
+ * "Start blank" is the `empty` template: no contact types, no forms, nothing
+ * to delete before building the use case nobody templated.
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MODE } from '../config.js';
+import { allocateProjectDir, registerProject } from '../state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,13 +40,13 @@ const TEMPLATES_DIR = path.resolve(__dirname, '..', '..', 'templates');
 /** Curated template metadata. Keep in sync with the directories in templates/. */
 const TEMPLATE_REGISTRY: Record<string, Omit<TemplateInfo, 'id' | 'forms'>> = {
   empty: {
-    label: 'Empty project',
+    label: 'Start blank',
     description:
       'Nothing pre-defined. Empty contact hierarchy, no contact types, no forms, no tasks, no contact-summary content. Pick this when you want to build everything from zero through the UI — including your very first place type.',
     hasStarterContent: false,
   },
   blank: {
-    label: 'Blank project',
+    label: 'Minimal scaffold',
     description:
       'Minimal cht-conf scaffold: hierarchy with district / health_facility / patient, empty tasks.js and contact-summary. Start from here for a new program.',
     hasStarterContent: false,
@@ -107,19 +117,28 @@ export async function registerTemplateRoutes(app: FastifyInstance): Promise<void
         forms: await countFormsInTemplate(path.join(TEMPLATES_DIR, d.name)),
       });
     }
+    // Registry order, not directory order: "Start blank" first.
+    const order = Object.keys(TEMPLATE_REGISTRY);
+    templates.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
     return { templates };
   });
 
-  app.post<{ Body: { path: string; template: string } }>(
+  /**
+   * Body: `{ template, name?, path? }`. Hosted: `name` (defaults to the
+   * template id) picks the folder under the user's projects dir. Desktop:
+   * `path` is the absolute target folder, as before.
+   */
+  app.post<{ Body: { template: string; name?: string; path?: string } }>(
     '/api/templates/create',
     {
       schema: {
         body: {
           type: 'object',
-          required: ['path', 'template'],
+          required: ['template'],
           properties: {
-            path: { type: 'string', minLength: 1 },
             template: { type: 'string', minLength: 1 },
+            name: { type: 'string' },
+            path: { type: 'string' },
           },
         },
       },
@@ -133,22 +152,39 @@ export async function registerTemplateRoutes(app: FastifyInstance): Promise<void
       if (!(await pathExists(src))) {
         return reply.code(500).send({ error: `Template directory missing on disk: ${src}` });
       }
-      const target = path.resolve(req.body.path);
-      if (await pathExists(target)) {
-        // Refuse to overwrite — too easy to clobber an existing project.
-        const entries = await fs.readdir(target).catch(() => []);
-        if (entries.length > 0) {
-          return reply.code(400).send({
-            error: `Target folder already exists and is non-empty: ${target}. Pick a new location or remove existing files first.`,
-          });
+
+      let target: string;
+      let name = (req.body.name ?? '').trim();
+      if (MODE === 'hosted') {
+        if (!name) name = TEMPLATE_REGISTRY[tmpl].label;
+        target = await allocateProjectDir(req.userId, name);
+      } else {
+        const p = (req.body.path ?? '').trim();
+        if (!p) return reply.code(400).send({ error: 'path is required in desktop mode' });
+        target = path.resolve(p);
+        if (!name) name = path.basename(target);
+        if (await pathExists(target)) {
+          // Refuse to overwrite — too easy to clobber an existing project.
+          const entries = await fs.readdir(target).catch(() => []);
+          if (entries.length > 0) {
+            return reply.code(400).send({
+              error: `Target folder already exists and is non-empty: ${target}. Pick a new location or remove existing files first.`,
+            });
+          }
         }
       }
       try {
         await copyDir(src, target);
-        return { ok: true, path: target };
       } catch (e) {
         return reply.code(500).send({ error: (e as Error).message });
       }
+      const entry = await registerProject(req.userId, {
+        name,
+        path: target,
+        source: 'template',
+        origin: tmpl,
+      });
+      return { ok: true, projectId: entry.id, ...(MODE === 'desktop' ? { path: target } : {}) };
     },
   );
 }

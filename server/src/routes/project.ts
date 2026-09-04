@@ -1,18 +1,33 @@
 /**
- * Project routes: open, close, current state, list project files at a glance.
+ * Project routes: the per-user registry (list / open / rename / forget),
+ * the project a request names, and desktop-only open-by-path. Folder browsing
+ * lives in browse.ts and is registered only in desktop mode.
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
-import { getProjectPath, setProjectPath } from '../state.js';
+import { MODE } from '../config.js';
+import {
+  getProject,
+  listProjects,
+  projectEntryFor,
+  registerProject,
+  removeProject,
+  renameProject,
+  touchProject,
+  type ProjectEntry,
+} from '../state.js';
 import { isPlaceholderFormFile } from '@cht-ui/shared';
 import { getParsedForm, directorySignature } from '../parsedFormCache.js';
 
 /** Minimal shape returned to the client when describing a project. */
-interface ProjectInfo {
+export interface ProjectInfo {
+  /** Registry id — what the client sends back as x-project-id. */
+  id: string;
+  /** Empty in hosted mode: no filesystem path crosses the wire. */
   path: string;
   name: string;
+  source: ProjectEntry['source'];
   hasAppSettings: boolean;
   hasAppForms: boolean;
   hasContactForms: boolean;
@@ -49,7 +64,7 @@ async function dirHasFiles(p: string, extensions: string[]): Promise<boolean> {
   }
 }
 
-async function describeProject(projectPath: string): Promise<ProjectInfo> {
+async function describeProject(projectPath: string): Promise<Omit<ProjectInfo, 'id' | 'source'>> {
   return {
     path: projectPath,
     name: path.basename(projectPath),
@@ -141,208 +156,151 @@ async function scanContactFieldChoices(
   return merged;
 }
 
+/** What the client needs to show a project: description + registry identity. */
+export async function describeEntry(entry: ProjectEntry): Promise<ProjectInfo> {
+  const info = await describeProject(entry.path);
+  return {
+    ...info,
+    id: entry.id,
+    name: entry.name,
+    source: entry.source,
+    // No filesystem path crosses the wire in hosted mode.
+    path: MODE === 'hosted' ? '' : info.path,
+  };
+}
+
+function publicEntry(p: ProjectEntry & { exists?: boolean }) {
+  return {
+    id: p.id,
+    name: p.name,
+    source: p.source,
+    origin: p.origin,
+    createdAt: p.createdAt,
+    lastOpenedAt: p.lastOpenedAt,
+    exists: p.exists ?? true,
+    ...(MODE === 'desktop' ? { path: p.path } : {}),
+  };
+}
+
 export async function registerProjectRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/project', async () => {
-    const projectPath = await getProjectPath();
-    if (!projectPath) return { open: false };
-    const exists = await fileExists(projectPath);
-    if (!exists) {
-      await setProjectPath(null);
-      return { open: false, error: 'previous project path no longer exists' };
+  /**
+   * The project this request names (x-project-id). In desktop mode with no
+   * header this is the most recently opened project, so a fresh tab lands in
+   * the folder the user last had open.
+   */
+  app.get('/api/project', async (req) => {
+    const entry = await projectEntryFor(req);
+    if (!entry) return { open: false };
+    if (!(await fileExists(entry.path))) {
+      return {
+        open: false,
+        error:
+          MODE === 'desktop'
+            ? `project folder no longer exists: ${entry.path}`
+            : 'project folder no longer exists',
+      };
     }
     // eslint-disable-next-line no-undef
     const t0 = performance.now();
-    const project = await describeProject(projectPath);
+    const project = await describeEntry(entry);
     // eslint-disable-next-line no-undef
     app.log.info({ ms: +(performance.now() - t0).toFixed(1) }, 'GET /api/project (describeProject)');
-    return { open: true, project };
+    return { open: true, project, projectId: entry.id };
   });
 
-  app.post<{ Body: { path: string } }>(
-    '/api/project/open',
+  /** This user's registry, most recently opened first. */
+  app.get('/api/projects', async (req) => {
+    const projects = await listProjects(req.userId);
+    return { mode: MODE, projects: projects.map(publicEntry) };
+  });
+
+  app.post<{ Body: { id: string } }>(
+    '/api/projects/open',
     {
       schema: {
         body: {
           type: 'object',
-          required: ['path'],
-          properties: { path: { type: 'string', minLength: 1 } },
+          required: ['id'],
+          properties: { id: { type: 'string', minLength: 1 } },
         },
       },
     },
     async (req, reply) => {
-      const requested = req.body.path;
-      const abs = path.resolve(requested);
-      if (!(await fileExists(abs))) {
-        return reply.code(400).send({ error: `Path does not exist: ${abs}` });
+      const existing = await getProject(req.userId, req.body.id);
+      if (!existing) return reply.code(404).send({ error: 'Project not found.' });
+      if (!(await fileExists(existing.path))) {
+        return reply.code(400).send({ error: 'This project folder no longer exists.' });
       }
-      const stat = await fs.stat(abs);
-      if (!stat.isDirectory()) {
-        return reply.code(400).send({ error: `Path is not a directory: ${abs}` });
-      }
-      await setProjectPath(abs);
-      // eslint-disable-next-line no-undef
-      const t0 = performance.now();
-      const project = await describeProject(abs);
-      // eslint-disable-next-line no-undef
-      app.log.info({ ms: +(performance.now() - t0).toFixed(1) }, 'POST /api/project/open (describeProject)');
-      return { open: true, project };
+      const entry = (await touchProject(req.userId, req.body.id)) ?? existing;
+      return { open: true, project: await describeEntry(entry), projectId: entry.id };
     },
   );
 
-  app.post('/api/project/close', async () => {
-    await setProjectPath(null);
-    return { open: false };
-  });
-
-  app.get('/api/browse/shortcuts', async () => {
-    const home = os.homedir();
-    const shortcuts: Array<{ label: string; path: string }> = [{ label: 'Home', path: home }];
-    if (process.platform === 'win32') {
-      for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
-        const root = `${letter}:\\`;
-        if (await fileExists(root)) shortcuts.push({ label: root, path: root });
-      }
-    } else {
-      shortcuts.push({ label: '/', path: '/' });
-    }
-    return { shortcuts };
-  });
-
-  app.get<{ Querystring: { path?: string; query?: string } }>(
-    '/api/browse/search',
+  app.patch<{ Params: { id: string }; Body: { name?: string } }>(
+    '/api/projects/:id',
     async (req, reply) => {
-      const root = (req.query.path ?? '').trim();
-      const query = (req.query.query ?? '').trim().toLowerCase();
-      if (!root) return reply.code(400).send({ error: 'path is required' });
-      if (!query) return { results: [] };
-      const abs = path.resolve(root);
-      if (!(await fileExists(abs))) {
-        return reply.code(400).send({ error: `Path does not exist: ${abs}` });
-      }
-      const results: Array<{ path: string; name: string; isProjectRoot: boolean }> = [];
-      const MAX_RESULTS = 200;
-      const MAX_DEPTH = 6;
-      async function walk(dir: string, depth: number): Promise<void> {
-        if (results.length >= MAX_RESULTS || depth > MAX_DEPTH) return;
-        let entries: import('node:fs').Dirent[];
-        try {
-          entries = await fs.readdir(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const e of entries) {
-          if (results.length >= MAX_RESULTS) return;
-          if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue;
-          const full = path.join(dir, e.name);
-          if (e.name.toLowerCase().includes(query)) {
-            results.push({
-              path: full,
-              name: e.name,
-              isProjectRoot: await isProjectRoot(full),
-            });
-          }
-          await walk(full, depth + 1);
-        }
-      }
-      await walk(abs, 0);
-      return { results };
+      const name = (req.body?.name ?? '').trim();
+      if (!name) return reply.code(400).send({ error: 'name is required' });
+      const entry = await renameProject(req.userId, req.params.id, name);
+      if (!entry) return reply.code(404).send({ error: 'Project not found.' });
+      return { ok: true, project: publicEntry(entry) };
     },
   );
 
-  app.get<{ Querystring: { path?: string } }>('/api/browse', async (req, reply) => {
-    const requested = (req.query.path ?? '').trim();
-    if (!requested) {
-      if (process.platform === 'win32') {
-        const drives: string[] = [];
-        for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
-          const root = `${letter}:\\`;
-          if (await fileExists(root)) drives.push(root);
-        }
-        return { path: '', parent: null, entries: drives.map((d) => ({ name: d, isDirectory: true, isProjectRoot: false })) };
-      }
-      return { path: '/', parent: null, entries: await listDirEntries('/') };
-    }
-    const abs = path.resolve(requested);
-    if (!(await fileExists(abs))) {
-      return reply.code(400).send({ error: `Path does not exist: ${abs}` });
-    }
-    const stat = await fs.stat(abs);
-    if (!stat.isDirectory()) {
-      return reply.code(400).send({ error: `Path is not a directory: ${abs}` });
-    }
-    const parent = path.dirname(abs);
-    return {
-      path: abs,
-      parent: parent === abs ? null : parent,
-      entries: await listDirEntries(abs),
-    };
-  });
+  /**
+   * Forget a project; `?files=1` also deletes it from disk when it lives
+   * under this user's projects dir. A desktop folder the user opened by path
+   * is only ever forgotten.
+   */
+  app.delete<{ Params: { id: string }; Querystring: { files?: string } }>(
+    '/api/projects/:id',
+    async (req, reply) => {
+      const result = await removeProject(req.userId, req.params.id, req.query.files === '1');
+      if (!result.removed) return reply.code(404).send({ error: 'Project not found.' });
+      return { ok: true, ...result };
+    },
+  );
 
-  app.post<{ Body: { path: string; name: string } }>(
-    '/api/browse/mkdir',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['path', 'name'],
-          properties: {
-            path: { type: 'string', minLength: 1 },
-            name: { type: 'string', minLength: 1 },
+  if (MODE === 'desktop') {
+    /** Desktop only: open a folder on this machine by absolute path. */
+    app.post<{ Body: { path: string } }>(
+      '/api/project/open',
+      {
+        schema: {
+          body: {
+            type: 'object',
+            required: ['path'],
+            properties: { path: { type: 'string', minLength: 1 } },
           },
         },
       },
-    },
-    async (req, reply) => {
-      const parent = path.resolve(req.body.path.trim());
-      const name = req.body.name.trim();
-      // Reject anything that could escape the parent or isn't a plain folder name.
-      if (name === '.' || name === '..' || /[\\/]/.test(name) || name.includes('\0')) {
-        return reply.code(400).send({ error: `Invalid folder name: ${req.body.name}` });
-      }
-      if (!(await fileExists(parent))) {
-        return reply.code(400).send({ error: `Parent folder does not exist: ${parent}` });
-      }
-      if (!(await fs.stat(parent)).isDirectory()) {
-        return reply.code(400).send({ error: `Parent is not a directory: ${parent}` });
-      }
-      const target = path.join(parent, name);
-      // Defense in depth: the new folder must land directly under the parent.
-      if (path.dirname(target) !== parent) {
-        return reply.code(400).send({ error: `Invalid folder name: ${req.body.name}` });
-      }
-      if (await fileExists(target)) {
-        return reply.code(409).send({ error: `A folder named "${name}" already exists here.` });
-      }
-      try {
-        await fs.mkdir(target);
-      } catch (e) {
-        return reply.code(500).send({ error: `Could not create folder: ${(e as Error).message}` });
-      }
-      return { path: target };
-    },
-  );
-}
-
-async function isProjectRoot(p: string): Promise<boolean> {
-  return fileExists(path.join(p, 'app_settings', 'base_settings.json'));
-}
-
-async function listDirEntries(
-  dir: string,
-): Promise<Array<{ name: string; isDirectory: boolean; isProjectRoot: boolean }>> {
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return [];
+      async (req, reply) => {
+        const abs = path.resolve(req.body.path);
+        if (!(await fileExists(abs))) {
+          return reply.code(400).send({ error: `Path does not exist: ${abs}` });
+        }
+        const stat = await fs.stat(abs);
+        if (!stat.isDirectory()) {
+          return reply.code(400).send({ error: `Path is not a directory: ${abs}` });
+        }
+        const entry = await registerProject(req.userId, {
+          name: path.basename(abs),
+          path: abs,
+          source: 'local',
+        });
+        // eslint-disable-next-line no-undef
+        const t0 = performance.now();
+        const project = await describeEntry(entry);
+        // eslint-disable-next-line no-undef
+        app.log.info({ ms: +(performance.now() - t0).toFixed(1) }, 'POST /api/project/open (describeProject)');
+        return { open: true, project, projectId: entry.id };
+      },
+    );
   }
-  const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
-  dirs.sort((a, b) => a.name.localeCompare(b.name));
-  return Promise.all(
-    dirs.map(async (e) => ({
-      name: e.name,
-      isDirectory: true,
-      isProjectRoot: await isProjectRoot(path.join(dir, e.name)),
-    })),
-  );
+
+  /**
+   * Closing is a client-side act now (the tab forgets its project id); this
+   * stays so older clients and specs that call it keep working.
+   */
+  app.post('/api/project/close', async () => ({ open: false }));
 }

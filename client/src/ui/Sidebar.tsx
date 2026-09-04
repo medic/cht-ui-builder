@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { session } from '../api.js';
 import { isAnyDirty, useApp } from '../state/store.js';
 
 export function Sidebar() {
@@ -19,22 +19,24 @@ export function Sidebar() {
     setView(target);
   }
 
-  async function close() {
+  function close() {
     if (hasUnsaved) {
       const ok = window.confirm('Close project and discard unsaved changes?');
       if (!ok) return;
     }
-    await api.closeProject();
+    // Closing is a per-tab act: this tab forgets its project id. Other tabs
+    // keep whatever they have open.
+    session.setProjectId(null);
     setProject(null);
   }
 
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <div className="project-name" title={project.path}>
+        <div className="project-name" title={project.path || project.name}>
           {project.name}
         </div>
-        <button className="secondary" onClick={() => void close()} title="Close this project and pick another">
+        <button className="secondary" onClick={close} title="Close this project and pick another">
           Change project
         </button>
       </div>

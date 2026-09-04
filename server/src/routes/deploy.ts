@@ -28,7 +28,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { getProjectPath } from '../state.js';
+import { projectRootOrNull } from '../state.js';
 import { matchErrorPattern } from '../cht-conf/errorPatterns.js';
 import { buildUrlWithCreds, chtBinary } from './cht-conf.js';
 
@@ -265,7 +265,7 @@ export async function registerDeployRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     '/api/deploy/run',
     async (req: FastifyRequest<{ Body: DeployRunBody }>, reply: FastifyReply) => {
-      const projectPath = await getProjectPath();
+      const projectPath = await projectRootOrNull(req);
       if (!projectPath) return reply.code(400).send({ error: 'No project open' });
 
       const invalid = validateDeployRunBody(req.body);
