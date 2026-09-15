@@ -6,7 +6,7 @@ Decisions in §4 were made by the PO on 2026-08-20. Built on 2026-09-04 — see 
 
 # Hosted CHT authoring
 
-**Status:** BUILT (rung 1) · **Branch:** `feat/hosted-authoring` · **Run it:** `docs/hosted-deploy.md`
+**Status:** BUILT (rung 1) · **Run it:** `docs/hosted-deploy.md` · **What shipped:** `docs/deployment-requirements.md`
 
 ## 0. What was built, and where it departs from the plan below
 
@@ -26,7 +26,7 @@ Everything in §11 landed, in order. Verified by `scripts/hosted-acceptance.mjs`
 | §8.4 registry | `GET /api/projects`, `POST /api/projects/open {id}`, `PATCH`/`DELETE /api/projects/:id` (`?files=1` deletes from disk only under the user's projects dir), `POST /api/templates/create {template, name}`. `POST /api/project/open {path}` remains, desktop-only. |
 | §8.5 import / export | `routes/transfer.ts`: `import-git` (shallow clone, size budget, project root found up to two levels down — nssd's `chis/`), `export-git` (add, commit, push `HEAD:refs/heads/<branch>`), `import-zip` (raw body, `adm-zip`, zip-slip refusal, common-root stripping, §6.5 exclusions), `export.zip`. Zip needed no multipart parser: the file is the request body. |
 | §8.6 client base URL | `VITE_API_BASE` read once in `api.ts`, which also adds `Authorization` and `x-project-id` to every call. Project id lives in **sessionStorage** — per tab — so two tabs edit two projects. |
-| §12 acceptance | `scripts/hosted-acceptance.mjs` (API level, spawns the server in both modes) in CI. The browser-level Playwright leg is not written yet; the desktop specs still pass through the unchanged `#project-path` path. |
+| §12 acceptance | Both legs, both in CI. `scripts/hosted-acceptance.mjs` at the API level (43 assertions; spawns the server in hosted AND desktop mode) covers isolation by every route, zip import/export and zip-slip refusal. `client/tests/hosted-authoring.spec.ts` under `playwright.hosted.config.ts` covers it in a browser against the built client on the server's own origin — sign up, start blank, land in the project, two tabs holding two projects, another user seeing none of it, sign out. The desktop specs still pass through the unchanged `#project-path` path. |
 | client | `SignIn`, a project list on `ProjectPicker` (open / delete / start blank / template / import git / import zip; the path input stays in desktop mode), the wizard asks for a name instead of a folder when hosted, `ProjectTransfer` on the overview (download zip; push branch for git imports). |
 
 Still true from §10: last-write-wins for two people on one config; one API instance per volume; no deploy credentials reach the hosted server (rung 1 has no upload).
@@ -97,12 +97,20 @@ lines of server route logic. Only how each route learns *which project* changes.
 
 ## 5. Architecture
 
-**Vercel serves the client** — already a static Vite build. One change: the 42
-relative `/api/…` calls in `api.ts` need an absolute base URL from an env var,
-set in `jsonFetch`, the single outbound chokepoint.
+> **Superseded during the build (2026-09-04).** This section originally put the
+> client on Vercel and the API in a separate container. That split was dropped:
+> one container serves both, from the same origin. It remains *possible* —
+> `VITE_API_BASE` in `api.ts` and `CORS_ORIGIN` on the server both still exist —
+> but nothing uses it, and it needs no CORS configuration when unused. See §0
+> and `docs/deployment-requirements.md` for what actually shipped.
 
-**A container serves the API** (Fly / Render / Railway): node + python +
-pyxform + cht-conf, and a volume at `/data`. The container is not optional:
+**One container serves everything**: node + python + pyxform + cht-conf, a
+volume at `/data`, and the built client served from the same origin
+(`SERVE_CLIENT=1`). The client's 42 relative `/api/…` calls therefore need no
+absolute base URL, though `jsonFetch` — the single outbound chokepoint — can
+take one.
+
+The container is not optional:
 
 | blocker | evidence |
 |---|---|
@@ -289,7 +297,7 @@ One env var read in `jsonFetch`.
 4. §8.3 The one commit.
 5. §8.4 Registry.
 6. §8.5 Git import/export, then zip.
-7. §8.6 Client base URL; deploy client to Vercel, API to the container.
+7. §8.6 Client base URL; ship the one container, client served from its own origin.
 
 ## 12. Acceptance
 
