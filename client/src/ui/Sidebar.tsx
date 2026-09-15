@@ -1,5 +1,88 @@
+/**
+ * Project sidebar: the tab rail, plus the panel that chooses which tabs it
+ * shows.
+ *
+ * Teams work on one part of a config at a time — a forms-only push has no use
+ * for tasks, sign-off or standard codes taking up the rail. Rather than
+ * deleting those tabs, the "Tabs" panel collapses them per browser: the views
+ * all still exist, nothing is removed from the project, and a tick box brings
+ * any of them straight back.
+ *
+ * Overview is deliberately not in the list. It is where `setProject` lands and
+ * where someone goes after hiding the tab they were on, so it always shows.
+ */
+import { useState } from 'react';
 import { session } from '../api.js';
-import { isAnyDirty, useApp } from '../state/store.js';
+import { isAnyDirty, useApp, type ProjectInfo, type View } from '../state/store.js';
+
+interface TabDef {
+  id: string;
+  label: string;
+  /** Where clicking the tab goes. */
+  view: View;
+  /** View kinds that mean "this tab is the current one". */
+  matches: View['kind'][];
+  /** Projects missing the underlying file get the tab greyed out, as before. */
+  requires?: (p: ProjectInfo) => boolean;
+}
+
+const TABS: TabDef[] = [
+  {
+    id: 'hierarchy',
+    label: 'Hierarchy',
+    view: { kind: 'hierarchy' },
+    matches: ['hierarchy'],
+    requires: (p) => p.hasAppSettings,
+  },
+  {
+    id: 'forms',
+    label: 'Forms',
+    view: { kind: 'forms-index' },
+    matches: ['forms-index', 'form', 'flowchart'],
+  },
+  {
+    id: 'tasks',
+    label: 'Tasks',
+    view: { kind: 'tasks' },
+    matches: ['tasks'],
+    requires: (p) => p.hasTasks,
+  },
+  {
+    id: 'contact-summary',
+    label: 'Contact summary',
+    view: { kind: 'contact-summary' },
+    matches: ['contact-summary'],
+    requires: (p) => p.hasContactSummary,
+  },
+  {
+    id: 'translations',
+    label: 'Translations',
+    view: { kind: 'translations' },
+    matches: ['translations'],
+  },
+  {
+    id: 'decisions',
+    label: 'Decisions (sign-off)',
+    view: { kind: 'decisions' },
+    matches: ['decisions'],
+  },
+  {
+    id: 'deploy',
+    label: 'Deploy',
+    view: { kind: 'deploy' },
+    matches: ['deploy'],
+  },
+  // V1 Standard codes — gated on "project has app forms" per the FHIR V1 plan
+  // (no app forms → nothing to map → disable). The workbench is the single
+  // place codes are assigned.
+  {
+    id: 'standard-codes',
+    label: 'Standard codes',
+    view: { kind: 'standard-codes' },
+    matches: ['standard-codes'],
+    requires: (p) => p.hasAppForms,
+  },
+];
 
 export function Sidebar() {
   const project = useApp((s) => s.project);
@@ -7,11 +90,15 @@ export function Sidebar() {
   const setView = useApp((s) => s.setView);
   const setProject = useApp((s) => s.setProject);
   const dirty = useApp((s) => s.dirty);
+  const hiddenTabs = useApp((s) => s.hiddenTabs);
+  const toggleTab = useApp((s) => s.toggleTab);
+  const showAllTabs = useApp((s) => s.showAllTabs);
+  const [panelOpen, setPanelOpen] = useState(false);
   const hasUnsaved = isAnyDirty(dirty);
 
   if (!project) return null;
 
-  function nav(target: typeof view): void {
+  function nav(target: View): void {
     if (hasUnsaved) {
       const ok = window.confirm('You have unsaved changes. Discard them?');
       if (!ok) return;
@@ -30,6 +117,20 @@ export function Sidebar() {
     setProject(null);
   }
 
+  function onToggle(tab: TabDef): void {
+    const hiding = !hiddenTabs.has(tab.id);
+    toggleTab(tab.id);
+    // Don't strand someone on a tab they just hid — but never discard their
+    // work to do it. With unsaved edits the view stays put (its content is
+    // still rendered, so nothing is lost) and they can leave when ready.
+    if (hiding && tab.matches.includes(view.kind) && !hasUnsaved) {
+      setView({ kind: 'project-overview' });
+    }
+  }
+
+  const shown = TABS.filter((t) => !hiddenTabs.has(t.id));
+  const hiddenCount = TABS.length - shown.length;
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -46,54 +147,55 @@ export function Sidebar() {
           active={view.kind === 'project-overview'}
           onClick={() => nav({ kind: 'project-overview' })}
         />
-        <NavItem
-          label="Hierarchy"
-          active={view.kind === 'hierarchy'}
-          onClick={() => nav({ kind: 'hierarchy' })}
-          disabled={!project.hasAppSettings}
-        />
-        <NavItem
-          label="Forms"
-          active={view.kind === 'forms-index' || view.kind === 'form' || view.kind === 'flowchart'}
-          onClick={() => nav({ kind: 'forms-index' })}
-        />
-        <NavItem
-          label="Tasks"
-          active={view.kind === 'tasks'}
-          onClick={() => nav({ kind: 'tasks' })}
-          disabled={!project.hasTasks}
-        />
-        <NavItem
-          label="Contact summary"
-          active={view.kind === 'contact-summary'}
-          onClick={() => nav({ kind: 'contact-summary' })}
-          disabled={!project.hasContactSummary}
-        />
-        <NavItem
-          label="Translations"
-          active={view.kind === 'translations'}
-          onClick={() => nav({ kind: 'translations' })}
-        />
-        <NavItem
-          label="Decisions (sign-off)"
-          active={view.kind === 'decisions'}
-          onClick={() => nav({ kind: 'decisions' })}
-        />
-        <NavItem
-          label="Deploy"
-          active={view.kind === 'deploy'}
-          onClick={() => nav({ kind: 'deploy' })}
-        />
-        {/* V1 Standard codes — gated on "project has app forms" per the
-            FHIR V1 plan (no app forms → nothing to map → disable). The
-            workbench is the single place codes are assigned. */}
-        <NavItem
-          label="Standard codes"
-          active={view.kind === 'standard-codes'}
-          onClick={() => nav({ kind: 'standard-codes' })}
-          disabled={!project.hasAppForms}
-        />
+        {shown.map((tab) => (
+          <NavItem
+            key={tab.id}
+            label={tab.label}
+            active={tab.matches.includes(view.kind)}
+            onClick={() => nav(tab.view)}
+            disabled={tab.requires ? !tab.requires(project) : false}
+          />
+        ))}
       </nav>
+
+      <div className="tab-panel-wrap">
+        <button
+          type="button"
+          className="link tab-panel-toggle"
+          onClick={() => setPanelOpen((v) => !v)}
+          aria-haspopup="dialog"
+          aria-expanded={panelOpen}
+          title="Choose which tabs appear in this sidebar"
+        >
+          ⚙ Tabs{hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}
+        </button>
+        {panelOpen && (
+          <div className="tab-panel" role="dialog" aria-label="Choose which tabs are shown">
+            <p className="muted small">
+              Hiding a tab only affects this browser. Nothing is removed from the project.
+            </p>
+            {TABS.map((tab) => (
+              <label key={tab.id} className="tab-panel-row">
+                <input
+                  type="checkbox"
+                  checked={!hiddenTabs.has(tab.id)}
+                  onChange={() => onToggle(tab)}
+                />
+                {tab.label}
+              </label>
+            ))}
+            <div className="tab-panel-actions">
+              <button type="button" className="link" onClick={showAllTabs} disabled={hiddenCount === 0}>
+                Show all
+              </button>
+              <button type="button" className="link" onClick={() => setPanelOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {hasUnsaved && <div className="dirty-flag">Unsaved changes</div>}
     </aside>
   );

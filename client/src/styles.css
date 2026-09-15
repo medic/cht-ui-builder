@@ -247,6 +247,55 @@ code {
   border-radius: 4px;
 }
 
+/* Tab-visibility panel. Sits directly under the rail it controls, and opens
+   to the RIGHT of the sidebar — 220px minus padding is too narrow for a
+   readable checkbox list. `.dirty-flag` keeps its `margin-top: auto`, so the
+   unsaved-changes cue still pins to the bottom below this. */
+.tab-panel-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+.tab-panel-toggle {
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.tab-panel {
+  position: absolute;
+  bottom: 0;
+  left: calc(100% + 8px);
+  z-index: 30;
+  width: 240px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+}
+.tab-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tab-panel-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.tab-panel-actions button {
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
 /* ---- Main content area ---- */
 .main {
   flex: 1;
@@ -1577,6 +1626,16 @@ button.danger:hover:not(:disabled) { background: #991b1b; }
   box-shadow: var(--shadow);
 }
 .form-preview header { margin-bottom: 12px; }
+.preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
 .preview-body { display: flex; flex-direction: column; gap: 10px; }
 .preview-field { display: flex; flex-direction: column; gap: 4px; }
 .preview-label { font-size: 13px; font-weight: 500; }
@@ -3085,6 +3144,38 @@ button.danger:hover:not(:disabled) { background: #991b1b; }
   border: 1px solid var(--border);
   font-size: 12px;
   color: var(--text);
+}
+/* The chips are buttons that show/hide their own label::xx columns on every
+   row card. `is-off` is the collapsed state; the last one on show is disabled
+   so the author can never end up with no label column to type into. */
+.language-chip-toggle {
+  cursor: pointer;
+  font-family: inherit;
+}
+/* `background` has to be restated on every state: the global
+   `button:hover:not(:disabled)` rule paints buttons solid primary, and without
+   an explicit value here a just-clicked chip stays under the cursor and reads
+   as selected — the exact opposite of what "off" means. */
+.language-chip-toggle:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.language-chip-toggle.is-off {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.language-chip-toggle.is-off:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.language-chip-toggle:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 .language-chip-add-wrap {
   position: relative;

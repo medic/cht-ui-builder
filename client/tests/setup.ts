@@ -20,7 +20,28 @@ export const PROJECT_PATH =
  * test. Hits the Fastify API directly so we don't have to drive the project
  * picker UI in every test.
  */
-export const test = base.extend<{ projectOpen: void }>({
+export const test = base.extend<{ projectOpen: void; allTabsVisible: void }>({
+  /**
+   * The suite drives every tab, but a fresh browser profile hides the ones
+   * outside the current forms focus (`DEFAULT_HIDDEN_TABS` in
+   * `client/src/state/store.ts`) — which would make sidebar navigation in
+   * specs click a button that is not rendered. Seed an explicit empty list so
+   * the full rail is present, exactly as it would be for someone who ticked
+   * everything back on.
+   */
+  allTabsVisible: [
+    async ({ page }, use) => {
+      await page.addInitScript(() => {
+        try {
+          window.localStorage.setItem('cht-ui-builder.hiddenTabs', '[]');
+        } catch {
+          /* storage unavailable — the app falls back to its defaults */
+        }
+      });
+      await use();
+    },
+    { auto: true },
+  ],
   projectOpen: [
     async ({ request }, use) => {
       // 127.0.0.1 (not `localhost`) so the request lands on the IPv4 socket

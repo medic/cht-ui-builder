@@ -15,6 +15,10 @@ import { ProjectTransfer } from './ProjectTransfer.js';
 export function ProjectOverview() {
   const project = useApp((s) => s.project);
   const setView = useApp((s) => s.setView);
+  // Hiding a tab in the sidebar has to hide its doorway here too, or the
+  // landing page keeps inviting you into a section you just put away. Ids
+  // match `TABS` in Sidebar.tsx.
+  const hiddenTabs = useApp((s) => s.hiddenTabs);
   // Recommend-order hint state. Fetched once per overview mount; an
   // empty contact_types array means the project is on CHT's silent
   // legacy-default hierarchy fallback, which the author probably
@@ -48,7 +52,7 @@ export function ProjectOverview() {
 
       {/* Onboarding nudge — only shows on a fresh / hierarchy-empty
           project. Non-blocking; the cards below are still clickable. */}
-      {hierarchyEmpty && (
+      {hierarchyEmpty && !hiddenTabs.has('hierarchy') && (
         <div className="onboarding-nudge">
           <strong>👋 Start with Hierarchy</strong>
           <p>
@@ -72,31 +76,39 @@ export function ProjectOverview() {
       )}
 
       <div className="overview-grid">
-        <OverviewCard
-          title="Hierarchy"
-          desc="Contact types and place hierarchy."
-          available={project.hasAppSettings}
-          recommended={hierarchyEmpty}
-          onClick={() => setView({ kind: 'hierarchy' })}
-        />
-        <OverviewCard
-          title="Forms"
-          desc="Edit or create app forms and contact forms."
-          available={project.hasAppForms || project.hasContactForms}
-          onClick={() => setView({ kind: 'forms-index' })}
-        />
-        <OverviewCard
-          title="Tasks"
-          desc="Edit task definitions and schedules."
-          available={project.hasTasks}
-          onClick={() => setView({ kind: 'tasks' })}
-        />
-        <OverviewCard
-          title="Contact summary"
-          desc="Edit the context flags forms depend on."
-          available={project.hasContactSummary}
-          onClick={() => setView({ kind: 'contact-summary' })}
-        />
+        {!hiddenTabs.has('hierarchy') && (
+          <OverviewCard
+            title="Hierarchy"
+            desc="Contact types and place hierarchy."
+            available={project.hasAppSettings}
+            recommended={hierarchyEmpty}
+            onClick={() => setView({ kind: 'hierarchy' })}
+          />
+        )}
+        {!hiddenTabs.has('forms') && (
+          <OverviewCard
+            title="Forms"
+            desc="Edit or create app forms and contact forms."
+            available={project.hasAppForms || project.hasContactForms}
+            onClick={() => setView({ kind: 'forms-index' })}
+          />
+        )}
+        {!hiddenTabs.has('tasks') && (
+          <OverviewCard
+            title="Tasks"
+            desc="Edit task definitions and schedules."
+            available={project.hasTasks}
+            onClick={() => setView({ kind: 'tasks' })}
+          />
+        )}
+        {!hiddenTabs.has('contact-summary') && (
+          <OverviewCard
+            title="Contact summary"
+            desc="Edit the context flags forms depend on."
+            available={project.hasContactSummary}
+            onClick={() => setView({ kind: 'contact-summary' })}
+          />
+        )}
       </div>
 
       <ProjectTransfer />
