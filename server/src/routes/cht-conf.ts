@@ -15,7 +15,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import http from 'node:http';
 import https from 'node:https';
-import { getProjectPath, getDeployConfig, setDeployConfig, type DeployConfig } from '../state.js';
+import { projectRootOrNull, getDeployConfig, setDeployConfig, type DeployConfig } from '../state.js';
 import { matchErrorPattern } from '../cht-conf/errorPatterns.js';
 import { isDryRunEnabled, runDryRun } from '../cht-conf/dryRun.js';
 
@@ -488,14 +488,14 @@ export async function registerChtConfRoutes(app: FastifyInstance): Promise<void>
     };
   });
 
-  app.get('/api/cht-conf/config', async () => {
-    return { config: (await getDeployConfig()) ?? null };
+  app.get('/api/cht-conf/config', async (req) => {
+    return { config: (await getDeployConfig(req.userId)) ?? null };
   });
 
   app.post<{ Body: { password?: string } }>(
     '/api/cht-conf/test-connection',
     async (req, reply) => {
-      const cfg = (await getDeployConfig()) ?? null;
+      const cfg = (await getDeployConfig(req.userId)) ?? null;
       const baseUrl = deployTargetBaseUrl(cfg);
       if (!baseUrl) {
         return reply.code(400).send({
@@ -508,19 +508,19 @@ export async function registerChtConfRoutes(app: FastifyInstance): Promise<void>
   );
 
   app.put<{ Body: DeployConfig }>('/api/cht-conf/config', async (req) => {
-    await setDeployConfig(req.body);
+    await setDeployConfig(req.userId, req.body);
     return { ok: true, config: req.body };
   });
 
   app.post<{ Body: { action: string; password?: string; extraArgs?: string[]; dryRun?: boolean } }>(
     '/api/cht-conf/run',
     async (req, reply) => {
-      const projectPath = await getProjectPath();
+      const projectPath = await projectRootOrNull(req);
       if (!projectPath) return reply.code(400).send({ error: 'No project open' });
       const meta = ACTION_CATALOG.find((a) => a.name === req.body.action);
       if (!meta) return reply.code(400).send({ error: `Unknown action: ${req.body.action}` });
 
-      const deploy = await getDeployConfig();
+      const deploy = await getDeployConfig(req.userId);
       const { args, loggedArgs } = buildArgs(
         req.body.action,
         deploy,
@@ -602,7 +602,7 @@ export async function registerChtConfRoutes(app: FastifyInstance): Promise<void>
   app.post<{ Body: { actions: string[]; password?: string; dryRun?: boolean } }>(
     '/api/cht-conf/run-sequence',
     async (req, reply) => {
-      const projectPath = await getProjectPath();
+      const projectPath = await projectRootOrNull(req);
       if (!projectPath) return reply.code(400).send({ error: 'No project open' });
       if (!Array.isArray(req.body.actions) || req.body.actions.length === 0) {
         return reply.code(400).send({ error: 'actions must be a non-empty array' });
@@ -613,7 +613,7 @@ export async function registerChtConfRoutes(app: FastifyInstance): Promise<void>
           return reply.code(400).send({ error: `Unknown action: ${name}` });
         }
       }
-      const deploy = await getDeployConfig();
+      const deploy = await getDeployConfig(req.userId);
       const dryRun = req.body.dryRun === true || isDryRunEnabled();
       const id = newRunId();
       const state: RunState = {

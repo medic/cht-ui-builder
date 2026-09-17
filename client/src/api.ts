@@ -1,9 +1,18 @@
+/* global window, document, fetch, Response, Storage, URL, URLSearchParams, File, FileReader, Event, RequestInit, TextDecoder */
 /**
  * Thin client for the Fastify server. All routes are proxied through
- * /api/* by Vite in dev; same-origin in production.
+ * /api/* by Vite in dev; same-origin in production — or, when the client is
+ * hosted apart from the API (Vercel + a container), prefixed with
+ * VITE_API_BASE. This module is the single outbound chokepoint: every request
+ * carries the session's bearer token and the tab's project id from here.
+ *
+ * The project id lives in sessionStorage, so each TAB pins its own project:
+ * two tabs edit two configs without a server-side "current project" to fight
+ * over (docs/plans/hosted-authoring.md §6.1). The token lives in localStorage
+ * so signing in once covers every tab.
  */
 import type { ContextScan, ContextWrapper, XLSForm } from '@cht-ui/shared';
-import type { FormListEntry, ProjectInfo } from './state/store.js';
+import type { FormListEntry, ProjectInfo, ServerMode } from './state/store.js';
 
 export interface DeployConfig {
   target: 'local' | 'instance' | 'url';
@@ -12,41 +21,215 @@ export interface DeployConfig {
   user?: string;
 }
 
+const API_BASE = (
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_API_BASE ?? ''
+).replace(/\/$/, '');
+const TOKEN_KEY = 'cht-ui-builder.token';
+const PROJECT_KEY = 'cht-ui-builder.projectId';
+
+function storageGet(store: Storage, key: string): string | null {
+  try {
+    return store.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function storageSet(store: Storage, key: string, value: string | null): void {
+  try {
+    if (value === null) store.removeItem(key);
+    else store.setItem(key, value);
+  } catch {
+    /* storage unavailable (private mode) — the in-memory session still works for this page */
+  }
+}
+
+/** Per-browser token and per-tab project id. */
+export const session = {
+  getToken: () => storageGet(window.localStorage, TOKEN_KEY),
+  setToken: (t: string | null) => storageSet(window.localStorage, TOKEN_KEY, t),
+  getProjectId: () => storageGet(window.sessionStorage, PROJECT_KEY),
+  setProjectId: (id: string | null) => storageSet(window.sessionStorage, PROJECT_KEY, id),
+};
+
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
+function authHeaders(): Record<string, string> {
+  const h: Record<string, string> = {};
+  const token = session.getToken();
+  if (token) h.authorization = `Bearer ${token}`;
+  const pid = session.getProjectId();
+  if (pid) h['x-project-id'] = pid;
+  return h;
+}
+
+/**
+ * URL for an EventSource, which cannot set headers: the token and project id
+ * ride the query string instead (the server accepts that on stream routes only).
+ */
+export function streamUrl(path: string): string {
+  const qs = new URLSearchParams();
+  const token = session.getToken();
+  if (token) qs.set('token', token);
+  const pid = session.getProjectId();
+  if (pid) qs.set('project', pid);
+  const q = qs.toString();
+  return apiUrl(`${path}${q ? (path.includes('?') ? '&' : '?') + q : ''}`);
+}
+
+async function readError(res: Response): Promise<string> {
+  let detail = '';
+  try {
+    const errBody = (await res.json()) as { error?: string };
+    detail = errBody.error ?? '';
+  } catch {
+    detail = await res.text();
+  }
+  return `${res.status} ${res.statusText}${detail ? ' — ' + detail : ''}`;
+}
+
 async function jsonFetch<T>(input: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, {
+  const res = await fetch(apiUrl(input), {
     ...init,
     headers: {
-      ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...(typeof init?.body === 'string' ? { 'content-type': 'application/json' } : {}),
+      ...authHeaders(),
       ...(init?.headers ?? {}),
     },
   });
   if (!res.ok) {
-    let detail = '';
-    try {
-      const errBody = (await res.json()) as { error?: string };
-      detail = errBody.error ?? '';
-    } catch {
-      detail = await res.text();
+    // An expired or revoked token: drop it and let the shell show sign-in.
+    if (res.status === 401 && session.getToken()) {
+      session.setToken(null);
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
-    throw new Error(`${res.status} ${res.statusText}${detail ? ' — ' + detail : ''}`);
+    throw new Error(await readError(res));
   }
   return (await res.json()) as T;
 }
 
+/** Fired on window when the server rejects the stored token. */
+export const UNAUTHORIZED_EVENT = 'cht-ui-builder:unauthorized';
+
+export interface SessionInfo {
+  mode: ServerMode;
+  user: { id: string; email: string | null } | null;
+}
+
+export interface ProjectListEntry {
+  id: string;
+  name: string;
+  source: 'local' | 'template' | 'import-git' | 'import-zip';
+  origin?: string;
+  createdAt: string;
+  lastOpenedAt: string;
+  exists: boolean;
+  /** Desktop mode only. */
+  path?: string;
+}
+
+type OpenResult = { open: boolean; project: ProjectInfo; projectId: string };
+
 export const api = {
   health: () => jsonFetch<{ ok: boolean; time: string }>('/api/health'),
 
-  getProject: () =>
-    jsonFetch<{ open: boolean; project?: ProjectInfo; error?: string }>('/api/project'),
+  /* ---------------------------------- auth --------------------------------- */
 
+  me: () => jsonFetch<SessionInfo>('/api/auth/me'),
+
+  signup: (email: string, password: string) =>
+    jsonFetch<{ user: { id: string; email: string }; token: string }>('/api/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  login: (email: string, password: string) =>
+    jsonFetch<{ user: { id: string; email: string }; token: string }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  logout: () => jsonFetch<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+
+  /* -------------------------------- projects ------------------------------- */
+
+  /** The project this tab names (or, desktop only, the last one opened). */
+  getProject: () =>
+    jsonFetch<{ open: boolean; project?: ProjectInfo; projectId?: string; error?: string }>(
+      '/api/project',
+    ),
+
+  listProjects: () =>
+    jsonFetch<{ mode: ServerMode; projects: ProjectListEntry[] }>('/api/projects'),
+
+  openProjectById: (id: string) =>
+    jsonFetch<OpenResult>('/api/projects/open', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    }),
+
+  /** Desktop only: open a folder on this machine by absolute path. */
   openProject: (path: string) =>
-    jsonFetch<{ open: boolean; project: ProjectInfo }>('/api/project/open', {
+    jsonFetch<OpenResult>('/api/project/open', {
       method: 'POST',
       body: JSON.stringify({ path }),
     }),
 
-  closeProject: () =>
-    jsonFetch<{ open: boolean }>('/api/project/close', { method: 'POST' }),
+  /** Desktop: forget the "last opened" fallback so a reload lands on the picker. Hosted: no-op. */
+  closeProject: () => jsonFetch<{ open: boolean }>('/api/project/close', { method: 'POST' }),
+
+  renameProject: (id: string, name: string) =>
+    jsonFetch<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
+  /** Forget a project; `deleteFiles` also removes it from the server's disk (hosted). */
+  deleteProject: (id: string, deleteFiles: boolean) =>
+    jsonFetch<{ ok: true; removed: boolean; deletedFiles: boolean }>(
+      `/api/projects/${encodeURIComponent(id)}${deleteFiles ? '?files=1' : ''}`,
+      { method: 'DELETE' },
+    ),
+
+  importGit: (url: string, name?: string, branch?: string) =>
+    jsonFetch<{ ok: true; projectId: string; subdir: string | null }>('/api/projects/import-git', {
+      method: 'POST',
+      body: JSON.stringify({ url, name: name || undefined, branch: branch || undefined }),
+    }),
+
+  exportGit: (id: string, branch: string, message?: string) =>
+    jsonFetch<{ ok: true; branch: string; committed: boolean; output: string }>(
+      `/api/projects/${encodeURIComponent(id)}/export-git`,
+      { method: 'POST', body: JSON.stringify({ branch, message }) },
+    ),
+
+  importZip: async (file: File, name: string) => {
+    const res = await fetch(apiUrl(`/api/projects/import-zip?name=${encodeURIComponent(name)}`), {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/zip' },
+      body: file,
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    return (await res.json()) as { ok: true; projectId: string; subdir: string | null };
+  },
+
+  /** Download the project as a zip (excluding node_modules, .git, map exports). */
+  downloadZip: async (id: string, filename: string) => {
+    const res = await fetch(apiUrl(`/api/projects/${encodeURIComponent(id)}/export.zip`), {
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.zip') ? filename : `${filename}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 
   browse: (path: string) =>
     jsonFetch<{
@@ -150,24 +333,13 @@ export const api = {
     steps: string[];
     extraArgs?: Record<string, string[]>;
   }): AsyncGenerator<Record<string, unknown>, void, void> {
-    // eslint-disable-next-line no-undef
-    const res = await fetch('/api/deploy/run', {
+    const res = await fetch(apiUrl('/api/deploy/run'), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (!res.ok || !res.body) {
-      let detail = '';
-      try {
-        const errBody = (await res.json()) as { error?: string };
-        detail = errBody.error ?? '';
-      } catch {
-        detail = await res.text();
-      }
-      throw new Error(`${res.status} ${res.statusText}${detail ? ' — ' + detail : ''}`);
-    }
+    if (!res.ok || !res.body) throw new Error(await readError(res));
     const reader = res.body.getReader();
-    // eslint-disable-next-line no-undef
     const decoder = new TextDecoder();
     let buf = '';
     while (true) {
@@ -213,10 +385,15 @@ export const api = {
       }>;
     }>('/api/templates'),
 
-  createFromTemplate: (path: string, template: string) =>
-    jsonFetch<{ ok: true; path: string }>('/api/templates/create', {
+  /**
+   * Scaffold a project from a template. Hosted: `name` picks the folder under
+   * the user's projects dir. Desktop: `path` is the absolute target folder.
+   * Either way the new project is registered; open it with `openProjectById`.
+   */
+  createFromTemplate: (template: string, opts: { name?: string; path?: string }) =>
+    jsonFetch<{ ok: true; projectId: string; path?: string }>('/api/templates/create', {
       method: 'POST',
-      body: JSON.stringify({ path, template }),
+      body: JSON.stringify({ template, ...opts }),
     }),
 
   listForms: () => jsonFetch<{ forms: FormListEntry[] }>('/api/forms'),

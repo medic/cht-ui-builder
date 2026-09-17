@@ -114,7 +114,7 @@ test('poc-build — empty project → hierarchy → forms → app form → deplo
     await page.goto('/');
 
     // ── New project → Empty template ──────────────────────────────────────
-    await page.getByRole('button', { name: /Create new project/ }).click();
+    await page.getByRole('button', { name: /From a template/ }).click();
     const wizard = page.locator('.modal-wide');
     await expect(wizard).toBeVisible();
     await shot(page, 'new-project-wizard');

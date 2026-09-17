@@ -88,7 +88,7 @@ test('anc-build — hierarchy → forms → pregnancy forms → 8-visit ANC sche
 
   /* ===================== 1. Area structure ===================== */
   await page.goto('/');
-  await page.getByRole('button', { name: /Create new project/ }).click();
+  await page.getByRole('button', { name: /From a template/ }).click();
   const wizard = page.locator('.modal-wide');
   await expect(wizard).toBeVisible();
   const emptyCard = wizard

@@ -219,6 +219,26 @@ Wraps the bundled `cht-conf` CLI.
   persist in `~/.cht-ui-builder/state.json`; **password is held in memory
   only and never written to disk**.
 
+## Hosted mode: build a CHT app with nothing installed
+
+The same server runs as a multi-user web app: sign up, start blank or from a
+template, import a config from a git URL or a zip, edit it, run the real
+cht-conf compile / convert / validate, and download a deployable project (or
+push a branch back). No git, node, python or cht-conf on the user's machine.
+
+```sh
+docker build -t cht-ui-builder .
+docker run -d -p 5174:5174 -v cht-ui-data:/data cht-ui-builder
+# http://localhost:5174
+```
+
+Set `CHT_UI_MODE=hosted` and every project is addressed by id inside the
+signed-in user's registry; no filesystem path crosses the wire and the folder
+browser is not registered. The default (desktop) mode is unchanged: one local
+user, any folder on this machine. Details, environment variables and the
+Vercel-client split: [docs/hosted-deploy.md](docs/hosted-deploy.md). Why and
+what was decided: [docs/plans/hosted-authoring.md](docs/plans/hosted-authoring.md).
+
 ## Round-trip safety
 
 The non-negotiable invariant: **parse → serialize → parse is byte-stable

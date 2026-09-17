@@ -1,18 +1,18 @@
 /**
- * New-project wizard: pick a template, pick a folder, scaffold a cht-conf
- * project and open it. Three steps:
+ * New-project wizard: pick a template, name it (hosted) or place it on disk
+ * (desktop), scaffold a cht-conf project and open it. Three steps:
  *
- *   1. Choose a template
- *   2. Pick a target folder (text input or FolderBrowser modal)
+ *   1. Choose a template — "Start blank" is the `empty` template and is a
+ *      first-class entry point, not a fallback (docs/plans/hosted-authoring.md §2)
+ *   2. Hosted: a name. Desktop: a target folder (text input or FolderBrowser)
  *   3. Confirm + scaffold + open
  *
- * The wizard does NOT generate XLSForm files yet — templates ship the
- * scaffolding (base_settings, tasks.js, contact-summary, properties.json,
- * translations) and the user creates forms via the existing "+ App form"
- * button after the project opens.
+ * The wizard does NOT generate XLSForm files — templates ship the scaffolding
+ * (base_settings, tasks.js, contact-summary, properties.json, translations)
+ * and the user creates forms via "+ App form" after the project opens.
  */
 import { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, session } from '../api.js';
 import { useApp } from '../state/store.js';
 import { FolderBrowser } from './FolderBrowser.js';
 
@@ -24,14 +24,15 @@ interface Template {
   hasStarterContent: boolean;
 }
 
-export function NewProjectWizard(props: { onCancel: () => void }) {
+export function NewProjectWizard(props: { onCancel: () => void; initialTemplate?: string }) {
+  const hosted = useApp((s) => s.session?.mode === 'hosted');
   const setProject = useApp((s) => s.setProject);
   const setError = useApp((s) => s.setError);
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(props.initialTemplate ? 2 : 1);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [picked, setPicked] = useState<string>('blank');
+  const [picked, setPicked] = useState<string>(props.initialTemplate ?? 'blank');
   const [parentPath, setParentPath] = useState('');
-  const [projectName, setProjectName] = useState('my-cht-project');
+  const [projectName, setProjectName] = useState(hosted ? '' : 'my-cht-project');
   const [browsing, setBrowsing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -43,20 +44,25 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
       .catch((e: Error) => setLocalError(e.message));
   }, []);
 
-  const targetPath =
-    parentPath && projectName ? joinPath(parentPath, projectName) : '';
+  const targetPath = !hosted && parentPath && projectName ? joinPath(parentPath, projectName) : '';
+  const step2Ready = hosted ? projectName.trim().length > 0 : Boolean(parentPath && projectName);
+  const pickedTemplate = templates.find((t) => t.id === picked);
 
   async function scaffold() {
-    if (!targetPath) {
-      setLocalError('Pick a parent folder and a project name first.');
+    if (!step2Ready) {
+      setLocalError(hosted ? 'Name the project first.' : 'Pick a parent folder and a project name first.');
       return;
     }
     setBusy(true);
     setLocalError(null);
     try {
-      await api.createFromTemplate(targetPath, picked);
-      // Now open it so the user lands inside the new project immediately.
-      const opened = await api.openProject(targetPath);
+      const created = await api.createFromTemplate(
+        picked,
+        hosted ? { name: projectName.trim() } : { path: targetPath, name: projectName.trim() },
+      );
+      // Open it so the user lands inside the new project immediately.
+      const opened = await api.openProjectById(created.projectId);
+      session.setProjectId(opened.projectId);
       setProject(opened.project);
       props.onCancel();
     } catch (e) {
@@ -71,7 +77,7 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
     <div className="modal-overlay" onClick={props.onCancel}>
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Create a new CHT project</h2>
+          <h2>{picked === 'empty' ? 'Start a blank CHT project' : 'Create a new CHT project'}</h2>
           <button className="link" onClick={props.onCancel}>
             ✕
           </button>
@@ -79,7 +85,13 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
 
         <div className="wizard-steps">
           <Step n={1} label="Template" active={step === 1} done={step > 1} onClick={() => setStep(1)} />
-          <Step n={2} label="Location" active={step === 2} done={step > 2} onClick={() => setStep(2)} />
+          <Step
+            n={2}
+            label={hosted ? 'Name' : 'Location'}
+            active={step === 2}
+            done={step > 2}
+            onClick={() => setStep(2)}
+          />
           <Step n={3} label="Confirm" active={step === 3} done={false} onClick={() => setStep(3)} />
         </div>
 
@@ -89,8 +101,9 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
           {step === 1 && (
             <>
               <p className="muted">
-                Pick a starter. <strong>Blank</strong> is the empty scaffold;
-                richer templates ship hierarchy + tasks.js + contact-summary so you don't write them from scratch.
+                Pick a starter. <strong>Start blank</strong> has nothing pre-defined — the honest
+                starting point for a use case nobody has templated. Richer templates ship a
+                hierarchy, tasks and contact-summary so you don't write them from scratch.
               </p>
               <div className="template-grid">
                 {templates.map((t) => (
@@ -101,9 +114,7 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
                   >
                     <h3>{t.label}</h3>
                     <p className="muted small">{t.description}</p>
-                    {t.hasStarterContent && (
-                      <span className="badge">starter content</span>
-                    )}
+                    {t.hasStarterContent && <span className="badge">starter content</span>}
                   </button>
                 ))}
                 {templates.length === 0 && <p className="muted">Loading templates…</p>}
@@ -111,11 +122,30 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
             </>
           )}
 
-          {step === 2 && (
+          {step === 2 && hosted && (
+            <div className="form-row">
+              <label htmlFor="new-project-name">Project name</label>
+              <input
+                id="new-project-name"
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Flood response 2026"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && step2Ready) setStep(3);
+                }}
+              />
+              <p className="muted small">You can rename it later. The name is yours; nothing else depends on it.</p>
+            </div>
+          )}
+
+          {step === 2 && !hosted && (
             <>
               <p className="muted">
-                Where on disk should the project live? The folder will be created as <code>parent / project-name</code>.
-                If it already exists and is non-empty, scaffolding will refuse to overwrite.
+                Where on disk should the project live? The folder will be created as{' '}
+                <code>parent / project-name</code>. If it already exists and is non-empty,
+                scaffolding will refuse to overwrite.
               </p>
               <div className="form-row">
                 <label>Parent folder</label>
@@ -161,21 +191,20 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
                   <tr>
                     <td>Template</td>
                     <td>
-                      <code>{picked}</code> —{' '}
-                      {templates.find((t) => t.id === picked)?.label}
+                      <code>{picked}</code> — {pickedTemplate?.label}
                     </td>
                   </tr>
                   <tr>
-                    <td>Target folder</td>
+                    <td>{hosted ? 'Name' : 'Target folder'}</td>
                     <td>
-                      <code>{targetPath}</code>
+                      <code>{hosted ? projectName.trim() : targetPath}</code>
                     </td>
                   </tr>
                 </tbody>
               </table>
               <p className="muted small">
                 After scaffolding, the project will open automatically. You can then add forms,
-                edit the hierarchy, and deploy.
+                edit the hierarchy, and check it with the real cht-conf toolchain.
               </p>
             </>
           )}
@@ -193,13 +222,13 @@ export function NewProjectWizard(props: { onCancel: () => void }) {
           {step < 3 && (
             <button
               onClick={() => setStep((step + 1) as 2 | 3)}
-              disabled={step === 1 ? !picked : !parentPath || !projectName}
+              disabled={step === 1 ? !picked : !step2Ready}
             >
               Next →
             </button>
           )}
           {step === 3 && (
-            <button onClick={() => void scaffold()} disabled={busy || !targetPath}>
+            <button onClick={() => void scaffold()} disabled={busy || !step2Ready}>
               {busy ? 'Scaffolding…' : 'Create project'}
             </button>
           )}

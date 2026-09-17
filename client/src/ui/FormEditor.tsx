@@ -112,6 +112,23 @@ export function FormEditor({ formId }: { formId: string }) {
   );
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
+  // Label columns are per-locale, so a seven-locale form (moh-nepal) renders
+  // seven label inputs on every row card. Authors work in one or two languages
+  // at a time, so the chip bar toggles which label::xx columns are rendered.
+  // View filter only: hidden locales stay in the form, are still saved, and
+  // still count towards the missing-translation cue on the columns on show.
+  // Lives here (not in SurveyTab) so the preview pane and the add-question
+  // picker honour the same set — a language hidden on the row cards used to
+  // reappear in both.
+  const [hiddenLocales, setHiddenLocales] = useState<ReadonlySet<string>>(() => new Set());
+  function toggleLocale(code: string) {
+    setHiddenLocales((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
   const [pendingSaveDiff, setPendingSaveDiff] = useState<XLSFormDiff | null>(null);
   // §H3 follow-up — click-to-jump channel. The Structural-issues popover lives in
   // the page header; clicking a row item sets `revealRowId`, which SurveyTab
@@ -326,6 +343,8 @@ export function FormEditor({ formId }: { formId: string }) {
             form={form}
             patch={patch}
             undo={undo}
+            hiddenLocales={hiddenLocales}
+            onToggleLocale={toggleLocale}
             getSnapshotId={() => formHistory.currentSnapshotId}
             jumpTo={formHistory.jumpTo}
             violationsByRow={violationsByRow}
@@ -339,7 +358,7 @@ export function FormEditor({ formId }: { formId: string }) {
           />
           {showPreview && (
             <div className="preview-pane">
-              <FormPreview form={form} />
+              <FormPreview form={form} hiddenLocales={hiddenLocales} />
             </div>
           )}
         </div>
@@ -486,6 +505,10 @@ function SurveyTab(props: {
   form: XLSForm;
   patch: (next: XLSForm) => void;
   undo: () => void;
+  /** Languages the author has collapsed away in the chip bar (owned by
+   *  FormEditor so the preview pane shares it). */
+  hiddenLocales: ReadonlySet<string>;
+  onToggleLocale: (code: string) => void;
   /** Capture the current snapshot id so toast Undo can jump back exactly. */
   getSnapshotId: () => number;
   jumpTo: (id: number) => void;
@@ -519,6 +542,15 @@ function SurveyTab(props: {
 }) {
   const { form, patch, violationsByRow, revealRowId, onRevealConsumed } = props;
   const undo = props.undo;
+  const { hiddenLocales } = props;
+  const toggleLocale = props.onToggleLocale;
+  // The add-question picker asks for one label per language; only the
+  // languages on show get an input. Every active locale is still seeded on
+  // commit ('' when not typed), so hiding a language never drops its column.
+  const allLabelLocales =
+    form.surveyHeaders.labelLocales.length > 0 ? form.surveyHeaders.labelLocales : ['en'];
+  const shownLabelLocales = allLabelLocales.filter((l) => !hiddenLocales.has(l));
+  const pickerLocales = shownLabelLocales.length > 0 ? shownLabelLocales : allLabelLocales;
   // §A4 surfaces structural-violation refusals via the shared error
   // toast so the user sees why a move was blocked.
   const setError = useApp((s) => s.setError);
@@ -1244,6 +1276,7 @@ function SurveyTab(props: {
           key={row.rowId}
           row={row}
           locales={form.surveyHeaders.labelLocales}
+          hiddenLocales={hiddenLocales}
           violations={violationsByRow.get(row.rowId) ?? []}
           fieldOptions={earlierFields}
           fieldChoices={fieldChoices}
@@ -1326,8 +1359,10 @@ function SurveyTab(props: {
 
   return (
     <div className="survey-tab">
-      {/* Wave 2 §4 — language chip bar. Shows the form's active locales
-          as read-only chips + a "+ Add language" affordance that opens a
+      {/* Wave 2 §4 — language chip bar. Shows the form's active locales as
+          toggle chips (click one to show or hide its label::xx columns on
+          every row card — a view filter, never a change to the form) plus a
+          "+ Add language" affordance that opens a
           curated locale picker (ISO 639-1 shortlist + free-text
           escape hatch). Adding a locale threads through `addLocale`
           which mutates `form.locales`/`labelLocales` for both sheets AND
@@ -1335,7 +1370,12 @@ function SurveyTab(props: {
           cue (the "!" glyph pattern from TranslationsEditor) is
           surfaced at the row-card label inputs — a chip here just names
           the locale. */}
-      <LanguageChipBar locales={form.surveyHeaders.labelLocales} onAdd={addLocale} />
+      <LanguageChipBar
+        locales={form.surveyHeaders.labelLocales}
+        onAdd={addLocale}
+        hiddenLocales={hiddenLocales}
+        onToggle={toggleLocale}
+      />
 
       <div className="row gap toolbar">
         <button onClick={() => addQuestion(defaultInsertIndex(form.survey))}>+ Question</button>
@@ -1442,14 +1482,10 @@ function SurveyTab(props: {
           sectionMode={pickerSectionMode}
           formCategory={props.formCategory}
           existingLists={existingListNames}
-          // Wave 2 §4 — thread the form's active locales so the picker
-          // renders one label input per locale at add-time. Fallback to
-          // `en` if the form has never declared any (blank scaffolds).
-          labelLocales={
-            form.surveyHeaders.labelLocales.length > 0
-              ? form.surveyHeaders.labelLocales
-              : ['en']
-          }
+          // Wave 2 §4 — one label input per locale at add-time, minus the
+          // languages hidden in the chip bar. Falls back to `en` if the form
+          // has never declared any (blank scaffolds).
+          labelLocales={pickerLocales}
           hideNameField={Boolean(pickerEditRowId)}
           initialName={
             pickerEditRowId
@@ -1966,7 +2002,11 @@ function SurveyGroupAccordion(props: {
 
 function SurveyRowCard(props: {
   row: SurveyRow;
+  /** Every locale on the sheet — drives the missing-translation cue. */
   locales: string[];
+  /** The subset of `locales` the author has collapsed away in the chip bar.
+   *  Rendering only; the sibling checks below still span every locale. */
+  hiddenLocales: ReadonlySet<string>;
   violations: OrderingViolation[];
   fieldOptions: string[];
   fieldChoices: Record<string, string[]>;
@@ -2135,6 +2175,7 @@ function SurveyRowCard(props: {
         </div>
         <div className="labels-grid">
           {props.locales.map((loc) => {
+            if (props.hiddenLocales.has(loc)) return null;
             // Wave 2 §4 — authoring-time missing-translation cue. When a
             // sibling locale on THIS row carries a non-empty label but
             // this locale doesn't, show the same "!" glyph the Translate
@@ -2294,7 +2335,9 @@ function SurveyRowCard(props: {
             <details className="raw-extras">
               <summary>Hints &amp; error messages</summary>
               <div className="hints-grid">
-                {props.locales.map((loc) => (
+                {props.locales
+                  .filter((loc) => !props.hiddenLocales.has(loc))
+                  .map((loc) => (
                   <ExpressionField
                     key={`hint-${loc}`}
                     label={`hint::${loc}`}
@@ -2306,7 +2349,9 @@ function SurveyRowCard(props: {
                   />
                 ))}
                 {row.extras['constraint'] &&
-                  props.locales.map((loc) => (
+                  props.locales
+                    .filter((loc) => !props.hiddenLocales.has(loc))
+                    .map((loc) => (
                     <ExpressionField
                       key={`cmsg-${loc}`}
                       label={`constraint_message::${loc}`}
@@ -4089,10 +4134,16 @@ function localeDisplayName(code: string): string {
  * .properties-file creation. Idempotent — passing a code that's already
  * in `locales` is a no-op upstream.
  */
-function LanguageChipBar(props: { locales: string[]; onAdd: (code: string) => void }) {
+function LanguageChipBar(props: {
+  locales: string[];
+  onAdd: (code: string) => void;
+  hiddenLocales: ReadonlySet<string>;
+  onToggle: (code: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [customCode, setCustomCode] = useState('');
   const activeLocales = props.locales.length > 0 ? props.locales : ['en'];
+  const shownCount = activeLocales.filter((l) => !props.hiddenLocales.has(l)).length;
   // Curated locales not already active — the shortlist buttons.
   const availableCurated = CURATED_LOCALES.filter((l) => !activeLocales.includes(l.code));
 
@@ -4113,11 +4164,31 @@ function LanguageChipBar(props: { locales: string[]; onAdd: (code: string) => vo
   return (
     <div className="language-chip-bar">
       <span className="muted small language-chip-bar-legend">Languages:</span>
-      {activeLocales.map((loc) => (
-        <span key={loc} className="language-chip" title={localeDisplayName(loc)}>
-          {localeDisplayName(loc)}
-        </span>
-      ))}
+      {activeLocales.map((loc) => {
+        const shown = !props.hiddenLocales.has(loc);
+        // Never let the author hide the last one standing — that would leave
+        // the row cards with nowhere to type a label at all.
+        const isLastShown = shown && shownCount === 1;
+        return (
+          <button
+            key={loc}
+            type="button"
+            className={`language-chip language-chip-toggle${shown ? '' : ' is-off'}`}
+            aria-pressed={shown}
+            disabled={isLastShown}
+            title={
+              isLastShown
+                ? `${localeDisplayName(loc)} — the last language on show cannot be hidden`
+                : shown
+                  ? `Hide the label::${loc} columns`
+                  : `Show the label::${loc} columns`
+            }
+            onClick={() => props.onToggle(loc)}
+          >
+            {localeDisplayName(loc)}
+          </button>
+        );
+      })}
       <div className="language-chip-add-wrap">
         <button
           type="button"

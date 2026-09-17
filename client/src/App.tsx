@@ -1,7 +1,9 @@
+/* global window, BeforeUnloadEvent */
 import { useEffect } from 'react';
 import { isAnyDirty, useApp } from './state/store.js';
-import { api } from './api.js';
+import { api, session, UNAUTHORIZED_EVENT } from './api.js';
 import { Sidebar } from './ui/Sidebar.js';
+import { SignIn } from './ui/SignIn.js';
 import { ProjectPicker } from './ui/ProjectPicker.js';
 import { ProjectOverview } from './ui/ProjectOverview.js';
 import { FormsIndex } from './ui/FormsIndex.js';
@@ -19,8 +21,10 @@ import { ErrorBoundary } from './ui/ErrorBoundary.js';
 import { UndoToastHost } from './ui/UndoToast.js';
 
 export function App() {
+  const sess = useApp((s) => s.session);
   const project = useApp((s) => s.project);
   const view = useApp((s) => s.view);
+  const setSession = useApp((s) => s.setSession);
   const setProject = useApp((s) => s.setProject);
   const setError = useApp((s) => s.setError);
   const dirty = useApp((s) => s.dirty);
@@ -38,23 +42,80 @@ export function App() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [dirty]);
 
-  // On mount, see if the server already has a project open.
+  // Who are we, and which mode is the server in? Decides whether sign-in is
+  // shown at all (hosted) or skipped (desktop: one implicit local user).
   useEffect(() => {
+    let alive = true;
+    api
+      .me()
+      .then((s) => {
+        if (alive) setSession(s);
+      })
+      .catch((e: Error) => {
+        if (alive) setError(`Cannot reach the server: ${e.message}`);
+      });
+    // A rejected token anywhere in the app drops us back to sign-in.
+    function onUnauthorized() {
+      setProject(null);
+      setSession({ mode: 'hosted', user: null });
+    }
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => {
+      alive = false;
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    };
+  }, [setSession, setProject, setError]);
+
+  // Then: does this tab already name a project? (Desktop mode also falls back
+  // to the last project opened, so a fresh tab lands where the user was.)
+  useEffect(() => {
+    if (!sess) return;
+    if (sess.mode === 'hosted' && (!sess.user || !session.getProjectId())) return;
     let alive = true;
     api
       .getProject()
       .then((res) => {
         if (!alive) return;
-        if (res.open && res.project) setProject(res.project);
+        if (res.open && res.project) {
+          session.setProjectId(res.projectId ?? res.project.id);
+          setProject(res.project);
+        } else if (res.error) {
+          session.setProjectId(null);
+          setError(res.error);
+        }
       })
       .catch((e: Error) => {
         if (!alive) return;
+        session.setProjectId(null);
         setError(e.message);
       });
     return () => {
       alive = false;
     };
-  }, [setProject, setError]);
+  }, [sess, setProject, setError]);
+
+  if (!sess) {
+    return (
+      <div className="app">
+        <ErrorBanner />
+        <div className="project-picker">
+          <div className="card">
+            <h1>CHT UI Builder</h1>
+            <p className="muted">Connecting…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (sess.mode === 'hosted' && !sess.user) {
+    return (
+      <div className="app">
+        <ErrorBanner />
+        <SignIn />
+      </div>
+    );
+  }
 
   if (!project) {
     return (

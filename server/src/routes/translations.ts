@@ -20,7 +20,7 @@ import {
   updateProperty,
   type PropertiesFile,
 } from '@cht-ui/shared';
-import { getProjectPath, resolveInsideProject } from '../state.js';
+import { projectRootOrNull, resolveInsideProject } from '../state.js';
 
 /** Relative directories, in scan order, that may contain translation files. */
 const DIRS = ['translations', 'app_settings/forms/translations'] as const;
@@ -102,8 +102,8 @@ function isUpdatePayload(body: unknown): body is UpdatePayload {
 }
 
 export async function registerTranslationRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/translations', async (_req, reply) => {
-    const root = await getProjectPath();
+  app.get('/api/translations', async (req, reply) => {
+    const root = await projectRootOrNull(req);
     if (!root) return reply.code(400).send({ error: 'No project is open.' });
     try {
       const files = await scanTranslationFiles(root);
@@ -148,7 +148,7 @@ export async function registerTranslationRoutes(app: FastifyInstance): Promise<v
         for (const d of DIRS) {
           const rel = `${d}/messages-${locale}.properties`;
           try {
-            await fs.access(await resolveInsideProject(rel));
+            await fs.access(await resolveInsideProject(req, rel));
             targetRel = rel;
             break;
           } catch {
@@ -163,7 +163,7 @@ export async function registerTranslationRoutes(app: FastifyInstance): Promise<v
       }
       let abs: string;
       try {
-        abs = await resolveInsideProject(targetRel);
+        abs = await resolveInsideProject(req, targetRel);
       } catch (e) {
         return reply.code(400).send({ error: (e as Error).message });
       }

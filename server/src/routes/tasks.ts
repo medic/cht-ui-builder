@@ -31,7 +31,7 @@ function isTaskFile(s: string): s is TaskFile {
 }
 
 export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/tasks/files', async (_req, reply) => {
+  app.get('/api/tasks/files', async (req, reply) => {
     try {
       const result: Record<TaskFile, string | null> = {
         'tasks.js': null,
@@ -39,7 +39,7 @@ export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
         'tasks-extras.js': null,
       };
       for (const f of FILES) {
-        const p = await resolveInsideProject(f);
+        const p = await resolveInsideProject(req, f);
         result[f] = await readTextSafe(p);
       }
       return result;
@@ -55,7 +55,7 @@ export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: `unknown task file: ${req.params.file}` });
       }
       try {
-        const p = await resolveInsideProject(req.params.file);
+        const p = await resolveInsideProject(req, req.params.file);
         await writeText(p, req.body.content);
         return { ok: true };
       } catch (e) {

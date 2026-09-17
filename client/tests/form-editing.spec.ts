@@ -783,3 +783,43 @@ test('calc builder — an if-then table round-trips and surfaces in the Decision
     await fs.rm(tmpProject, { recursive: true, force: true });
   }
 });
+
+/* ======================= demo bugs, 2026-09-17 ======================= */
+
+/**
+ * Hiding a language in the chip bar must hide it everywhere it is offered:
+ * the row cards (already did), the add-question picker and the preview pane
+ * (did not — the hidden language came back in both).
+ */
+test('language chips — a hidden language is offered by neither the add-question picker nor the preview', async ({
+  page,
+}) => {
+  await openPregnancy(page);
+  // Hide `ne` through its chip. The chip text is the language NAME; the
+  // locale code lives in its title, so target that.
+  const neChip = page.locator('.language-chip-toggle[title="Hide the label::ne columns"]');
+  await expect(neChip).toBeVisible();
+  await neChip.click();
+
+  // Row cards: no label::ne input on show.
+  await expect(page.locator('.survey-row').first().getByText('label::ne', { exact: true })).toHaveCount(0);
+
+  // Picker: only label::en asked for.
+  await page.getByRole('button', { name: '+ Question' }).first().click();
+  const picker = page.locator('.qtype-modal');
+  await expect(picker).toBeVisible();
+  await expect(picker.getByText('label::en', { exact: true })).toBeVisible();
+  await expect(picker.getByText('label::ne', { exact: true })).toHaveCount(0);
+  await picker.getByRole('button', { name: 'Close' }).click();
+
+  // Preview: no `ne` tab.
+  await page.getByRole('button', { name: 'Show preview' }).click();
+  const preview = page.locator('.form-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview.locator('header').getByRole('button', { name: 'en', exact: true })).toBeVisible();
+  await expect(preview.locator('header').getByRole('button', { name: 'ne', exact: true })).toHaveCount(0);
+
+  // Show it again: it comes back in the preview.
+  await page.locator('.language-chip-toggle[title="Show the label::ne columns"]').click();
+  await expect(preview.locator('header').getByRole('button', { name: 'ne', exact: true })).toBeVisible();
+});

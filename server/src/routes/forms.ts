@@ -1,12 +1,12 @@
 /**
  * Form routes: list, read, write XLSForms (and their properties.json).
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { getProjectPath, resolveInsideProject } from '../state.js';
+import { projectRootOrNull, resolveInsideProject } from '../state.js';
 import { getParsedForm, invalidate as invalidateParsedForm } from '../parsedFormCache.js';
 import {
   serializeXlsForm,
@@ -97,8 +97,8 @@ async function fileExists(p: string): Promise<boolean> {
   }
 }
 
-async function pathsForForm(category: FormCategory, basename: string) {
-  const dir = await resolveInsideProject(path.join('forms', category));
+async function pathsForForm(req: FastifyRequest, category: FormCategory, basename: string) {
+  const dir = await resolveInsideProject(req, path.join('forms', category));
   return {
     xlsx: path.join(dir, `${basename}.xlsx`),
     xml: path.join(dir, `${basename}.xml`),
@@ -214,10 +214,10 @@ async function listExistingXlsxBasenames(dir: string): Promise<string[]> {
  * the basename to APP_FORMS. Best-effort: bails silently if the file
  * doesn't exist or doesn't match the expected shape.
  */
-async function maintainFormConstants(basename: string): Promise<void> {
+async function maintainFormConstants(req: FastifyRequest, basename: string): Promise<void> {
   let p: string;
   try {
-    p = await resolveInsideProject('form-constants.js');
+    p = await resolveInsideProject(req, 'form-constants.js');
   } catch {
     return;
   }
@@ -365,8 +365,8 @@ async function detectChangedForms(projectPath: string): Promise<{ git: boolean; 
 }
 
 export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/forms', async (_req, reply) => {
-    const projectPath = await getProjectPath();
+  app.get('/api/forms', async (req, reply) => {
+    const projectPath = await projectRootOrNull(req);
     if (!projectPath) return reply.code(400).send({ error: 'No project open' });
     const appDir = path.join(projectPath, 'forms', 'app');
     const contactDir = path.join(projectPath, 'forms', 'contact');
@@ -377,8 +377,8 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
     return { forms: [...appForms, ...contactForms] };
   });
 
-  app.get('/api/forms/changed', async (_req, reply) => {
-    const projectPath = await getProjectPath();
+  app.get('/api/forms/changed', async (req, reply) => {
+    const projectPath = await projectRootOrNull(req);
     if (!projectPath) return reply.code(400).send({ error: 'No project open' });
     return detectChangedForms(projectPath);
   });
@@ -414,7 +414,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
       }
       // The target form must exist — media belongs to a form, and this
       // also pins `basename` to a real on-disk name.
-      const paths = await pathsForForm(parts.category, parts.basename);
+      const paths = await pathsForForm(req, parts.category, parts.basename);
       if (!(await fileExists(paths.xlsx))) {
         return reply.code(404).send({ error: `Form ${req.params.id} not found` });
       }
@@ -427,12 +427,12 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
       if (buf.length === 0) {
         return reply.code(400).send({ error: 'Empty file' });
       }
-      const mediaDir = await resolveInsideProject(
+      const mediaDir = await resolveInsideProject(req, 
         path.join('forms', parts.category, `${parts.basename}-media`),
       );
       await fs.mkdir(mediaDir, { recursive: true });
       // Path-traversal backstop on the final joined path too.
-      await resolveInsideProject(
+      await resolveInsideProject(req, 
         path.join('forms', parts.category, `${parts.basename}-media`, safe),
       );
       await fs.writeFile(path.join(mediaDir, safe), buf);
@@ -447,7 +447,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
     }
-    const paths = await pathsForForm(parts.category, parts.basename);
+    const paths = await pathsForForm(req, parts.category, parts.basename);
     if (!(await fileExists(paths.xlsx))) {
       return reply.code(404).send({ error: `Form file missing: ${paths.xlsx}` });
     }
@@ -474,7 +474,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
       } catch (e) {
         return reply.code(400).send({ error: (e as Error).message });
       }
-      const paths = await pathsForForm(parts.category, parts.basename);
+      const paths = await pathsForForm(req, parts.category, parts.basename);
       // Serialize and write atomically (write to tmp, rename).
       const buf = await serializeXlsForm(req.body.form);
       const tmp = `${paths.xlsx}.tmp`;
@@ -524,7 +524,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
       // when the client sent title-only — in which case we still fold the
       // on-disk basenames into the collision set so a legacy title-only
       // caller isn't silently downgraded to a 409.
-      const dir = await resolveInsideProject(path.join('forms', category));
+      const dir = await resolveInsideProject(req, path.join('forms', category));
       await fs.mkdir(dir, { recursive: true });
       const existingBasenames = await listExistingXlsxBasenames(dir);
       const resolved = resolveCreateFormBasename(title, rawBasename, existingBasenames, category);
@@ -534,7 +534,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(resolved.conflict ? 409 : 400).send({ error: resolved.error });
       }
       const { basename, humanTitle } = resolved;
-      const paths = await pathsForForm(category, basename);
+      const paths = await pathsForForm(req, category, basename);
       if (await fileExists(paths.xlsx)) {
         // Race backstop only — the collision-resolution above (both
         // client-side pre-flight and the title-only fallback) should
@@ -567,7 +567,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
         };
         await fs.writeFile(paths.properties, JSON.stringify(props, null, 2), 'utf8');
       }
-      await maintainFormConstants(basename);
+      await maintainFormConstants(req, basename);
       return { ok: true, id: formId(category, basename), basename };
     },
   );
@@ -617,7 +617,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Ensure the contact-forms dir exists exactly once for the batch.
-    const dir = await resolveInsideProject(path.join('forms', 'contact'));
+    const dir = await resolveInsideProject(req, path.join('forms', 'contact'));
     await fs.mkdir(dir, { recursive: true });
     // The route stamps the version once per batch so a multi-file
     // generate-run produces uniform metadata.
@@ -651,7 +651,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
         report.push(entry);
         continue;
       }
-      const paths = await pathsForForm('contact', basename);
+      const paths = await pathsForForm(req, 'contact', basename);
       const existed = await fileExists(paths.xlsx);
       if (existed && !overwriteMode) {
         // Default skip-not-overwrite (plan §3 hard rule). NEVER clobber
@@ -720,7 +720,7 @@ export async function registerFormRoutes(app: FastifyInstance): Promise<void> {
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
     }
-    const paths = await pathsForForm(parts.category, parts.basename);
+    const paths = await pathsForForm(req, parts.category, parts.basename);
     for (const p of [paths.xlsx, paths.xml, paths.properties]) {
       if (await fileExists(p)) await fs.unlink(p);
     }

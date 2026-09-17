@@ -146,7 +146,7 @@ test('geriatric full arc — no-code build → deploy → CHT task lifecycle', a
 
   /* ═══════════ PART 1a — new project from the CHT-baseline template ═══════════ */
   await page.goto('/');
-  await page.getByRole('button', { name: /Create new project/ }).click();
+  await page.getByRole('button', { name: /From a template/ }).click();
   const wizard = page.locator('.modal-wide');
   await wizard.locator('.template-card')
     .filter({ has: page.getByRole('heading', { name: 'CHT baseline' }) }).click();

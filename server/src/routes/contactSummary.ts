@@ -17,7 +17,7 @@ import {
   type EligibilityForScan,
   type FormForScan,
 } from '@cht-ui/shared';
-import { resolveInsideProject } from '../state.js';
+import { projectRootFor, resolveInsideProject } from '../state.js';
 
 async function readTextSafe(p: string): Promise<string | null> {
   try {
@@ -55,8 +55,7 @@ function isCSFile(s: string): s is CSFile {
  * templated one — so a wrong guess here is the difference between 70 keys and
  * zero. docs/principle-config-agnostic.md, posture 2.
  */
-async function discoverContactSummaryFiles(): Promise<Array<{ file: string; source: string }>> {
-  const root = await resolveInsideProject('.');
+async function discoverContactSummaryFiles(root: string): Promise<Array<{ file: string; source: string }>> {
   let entries: string[];
   try {
     entries = await fs.readdir(root);
@@ -79,14 +78,14 @@ async function discoverContactSummaryFiles(): Promise<Array<{ file: string; sour
 }
 
 export async function registerContactSummaryRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/contact-summary/files', async (_req, reply) => {
+  app.get('/api/contact-summary/files', async (req, reply) => {
     try {
       const result: Record<CSFile, string | null> = {
         'contact-summary.templated.js': null,
         'contact-summary.extras.js': null,
       };
       for (const f of FILES) {
-        const p = await resolveInsideProject(f);
+        const p = await resolveInsideProject(req, f);
         result[f] = await readTextSafe(p);
       }
       return result;
@@ -113,9 +112,9 @@ export async function registerContactSummaryRoutes(app: FastifyInstance): Promis
    *
    * All read-only. Nothing here writes.
    */
-  app.get('/api/contact-summary/context-keys', async (_req, reply) => {
+  app.get('/api/contact-summary/context-keys', async (req, reply) => {
     try {
-      const summaryFiles = await discoverContactSummaryFiles();
+      const summaryFiles = await discoverContactSummaryFiles(await projectRootFor(req));
       const definitions = scanContextDefinitions(summaryFiles);
 
       // Channels 1 + 2 walk the forms on disk. Deliberately the .xlsx
@@ -132,7 +131,7 @@ export async function registerContactSummaryRoutes(app: FastifyInstance): Promis
         let dir: string;
         let entries: string[];
         try {
-          dir = await resolveInsideProject(path.join('forms', category));
+          dir = await resolveInsideProject(req, path.join('forms', category));
           entries = await fs.readdir(dir);
         } catch {
           continue;
@@ -215,7 +214,7 @@ export async function registerContactSummaryRoutes(app: FastifyInstance): Promis
         return reply.code(400).send({ error: `unknown contact-summary file: ${req.params.file}` });
       }
       try {
-        const p = await resolveInsideProject(req.params.file);
+        const p = await resolveInsideProject(req, req.params.file);
         await writeText(p, req.body.content);
         return { ok: true };
       } catch (e) {

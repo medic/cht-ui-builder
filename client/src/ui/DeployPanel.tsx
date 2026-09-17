@@ -15,7 +15,7 @@ import {
   type PreflightFix,
   type XLSForm,
 } from '@cht-ui/shared';
-import { api, type DeployConfig } from '../api.js';
+import { api, streamUrl, type DeployConfig } from '../api.js';
 import { useApp } from '../state/store.js';
 import { PreflightPanel } from './PreflightPanel.js';
 
@@ -558,7 +558,8 @@ export function DeployPanel() {
 
   function streamRun(id: string) {
     eventSourceRef.current?.close();
-    const es = new EventSource(`/api/cht-conf/runs/${encodeURIComponent(id)}/stream`);
+    // EventSource cannot set headers, so the token + project id ride the URL.
+    const es = new EventSource(streamUrl(`/api/cht-conf/runs/${encodeURIComponent(id)}/stream`));
     eventSourceRef.current = es;
     es.addEventListener('line', (e) => {
       const { line } = JSON.parse((e as MessageEvent).data) as { line: string };

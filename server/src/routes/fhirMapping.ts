@@ -162,7 +162,7 @@ async function writeSidecar(sidecarPath: string, content: string): Promise<void>
 }
 
 export async function registerFhirMappingRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/fhir-mapping', async (_req, reply) => {
+  app.get('/api/fhir-mapping', async (req, reply) => {
     // Timing instrumentation — see docs/plans/perf-parse-cache.md targets:
     // warm `/api/fhir-mapping` < 200 ms (from ~7 s). Always-on so we
     // catch any regression in normal usage, not just measurement passes.
@@ -171,7 +171,7 @@ export async function registerFhirMappingRoutes(app: FastifyInstance): Promise<v
     let sidecarPath: string;
     let projectPath: string;
     try {
-      sidecarPath = await resolveInsideProject(SIDECAR_FILENAME);
+      sidecarPath = await resolveInsideProject(req, SIDECAR_FILENAME);
       projectPath = path.dirname(sidecarPath);
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
@@ -214,7 +214,7 @@ export async function registerFhirMappingRoutes(app: FastifyInstance): Promise<v
   /** PR2 helper — return the loaded starter pack so the client can
    *  surface the available dictionaries / concept list without
    *  having to import the Node-only loader. */
-  app.get('/api/fhir-mapping/pack', async (_req, reply) => {
+  app.get('/api/fhir-mapping/pack', async (req, reply) => {
     try {
       const pack = loadStarterPack('cht-mch-v1');
       return { pack };
@@ -237,7 +237,7 @@ export async function registerFhirMappingRoutes(app: FastifyInstance): Promise<v
     async (req, reply) => {
       let sidecarPath: string;
       try {
-        sidecarPath = await resolveInsideProject(SIDECAR_FILENAME);
+        sidecarPath = await resolveInsideProject(req, SIDECAR_FILENAME);
       } catch (e) {
         return reply.code(400).send({ error: (e as Error).message });
       }

@@ -19,3 +19,8 @@ client/demo/
 # Per-machine throwaway Vite config for stable local runs (ignores
 # shared/dist in the watcher to avoid HMR storms). Not meant to be committed.
 client/vite.config.run.mjs
+# Planning docs: internal design conversations, not repo documentation.
+# They go stale the moment the work ships and describe decisions that were
+# often reversed during the build. Kept locally; what shipped is documented in
+# docs/deployment-requirements.md and the other docs/*.md.
+docs/plans/
