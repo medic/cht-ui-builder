@@ -8,6 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { MODE } from '../config.js';
 import {
+  clearLastOpened,
   getProject,
   listProjects,
   projectEntryFor,
@@ -299,8 +300,13 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
   }
 
   /**
-   * Closing is a client-side act now (the tab forgets its project id); this
-   * stays so older clients and specs that call it keep working.
+   * Closing: the tab forgets its project id client-side, and in desktop mode
+   * the server also forgets which project a request with no id resolves to —
+   * otherwise a reload after "Change project" lands straight back inside it.
+   * Hosted mode has no such fallback, so there it is a no-op.
    */
-  app.post('/api/project/close', async () => ({ open: false }));
+  app.post('/api/project/close', async (req) => {
+    if (MODE === 'desktop') await clearLastOpened(req.userId);
+    return { open: false };
+  });
 }

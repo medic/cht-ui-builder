@@ -12,7 +12,7 @@
  * where someone goes after hiding the tab they were on, so it always shows.
  */
 import { useState } from 'react';
-import { session } from '../api.js';
+import { api, session } from '../api.js';
 import { isAnyDirty, useApp, type ProjectInfo, type View } from '../state/store.js';
 
 interface TabDef {
@@ -111,9 +111,11 @@ export function Sidebar() {
       const ok = window.confirm('Close project and discard unsaved changes?');
       if (!ok) return;
     }
-    // Closing is a per-tab act: this tab forgets its project id. Other tabs
-    // keep whatever they have open.
+    // This tab forgets its project id; other tabs keep whatever they have
+    // open. The server call clears desktop mode's "last opened" fallback so a
+    // reload lands on the picker, not back inside this project.
     session.setProjectId(null);
+    void api.closeProject().catch(() => undefined);
     setProject(null);
   }
 

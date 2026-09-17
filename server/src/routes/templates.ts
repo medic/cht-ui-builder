@@ -40,13 +40,13 @@ const TEMPLATES_DIR = path.resolve(__dirname, '..', '..', 'templates');
 /** Curated template metadata. Keep in sync with the directories in templates/. */
 const TEMPLATE_REGISTRY: Record<string, Omit<TemplateInfo, 'id' | 'forms'>> = {
   empty: {
-    label: 'Start blank',
+    label: 'Empty project',
     description:
       'Nothing pre-defined. Empty contact hierarchy, no contact types, no forms, no tasks, no contact-summary content. Pick this when you want to build everything from zero through the UI — including your very first place type.',
     hasStarterContent: false,
   },
   blank: {
-    label: 'Minimal scaffold',
+    label: 'Blank project',
     description:
       'Minimal cht-conf scaffold: hierarchy with district / health_facility / patient, empty tasks.js and contact-summary. Start from here for a new program.',
     hasStarterContent: false,

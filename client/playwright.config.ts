@@ -54,6 +54,23 @@ export default defineConfig({
     actionTimeout: 5_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // Every context starts as "someone who ticked every tab back on". A
+    // fresh browser profile hides Tasks / Contact summary / Translations /
+    // Decisions / Standard codes (DEFAULT_HIDDEN_TABS in state/store.ts),
+    // and fourteen specs click those nav items. setup.ts seeds the same key
+    // per test, but only for specs that import `test` from './setup.js';
+    // the build/deploy specs import it from '@playwright/test' and were
+    // clicking a button that is not rendered. Seeding it at the profile
+    // level covers both import paths.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: 'http://localhost:5173',
+          localStorage: [{ name: 'cht-ui-builder.hiddenTabs', value: '[]' }],
+        },
+      ],
+    },
   },
   projects: [
     {

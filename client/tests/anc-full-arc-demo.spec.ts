@@ -54,7 +54,7 @@ test('full arc — no-code build → deploy → CHW adds a woman → ANC task', 
   await request.post(`${API}/api/project/close`).catch(() => {});
   await fs.rm(projectPath, { recursive: true, force: true });
   await page.goto('/');
-  await page.getByRole('button', { name: /Create new project/ }).click();
+  await page.getByRole('button', { name: /From a template/ }).click();
   const wizard = page.locator('.modal-wide');
   await wizard.locator('.template-card').filter({ has: page.getByRole('heading', { name: 'Empty project' }) }).click();
   await wizard.getByRole('button', { name: /Next/ }).click();

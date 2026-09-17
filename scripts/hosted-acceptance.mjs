@@ -210,6 +210,11 @@ async function desktop() {
     check((await c.with(opened.data.projectId).json('GET', '/api/forms')).status === 200, 'desktop: routes work with x-project-id');
     check((await c.with('p_nope').json('GET', '/api/forms')).status === 400, 'desktop: an unknown project id is refused, not silently redirected');
     check((await c.json('GET', '/api/browse/shortcuts')).status === 200, 'desktop: folder browser is available');
+    check((await c.json('POST', '/api/project/close')).data.open === false, 'desktop: close answers');
+    check((await c.json('GET', '/api/project')).data.open === false, 'desktop: after close, no project id → nothing open (the picker renders on reload)');
+    check((await c.with(opened.data.projectId).json('GET', '/api/forms')).status === 200, 'desktop: a tab that still names the project keeps working after close');
+    check((await c.json('POST', '/api/project/open', { path: projDir })).data.open === true, 'desktop: re-opening restores the fallback');
+    check((await c.json('GET', '/api/project')).data.open === true, 'desktop: fallback is back after re-open');
     const forgot = await c.json('DELETE', `/api/projects/${opened.data.projectId}?files=1`);
     check(forgot.data.removed === true && forgot.data.deletedFiles === false, 'desktop: forgetting never deletes a folder the user opened by path');
     check(existsSync(path.join(projDir, 'app_settings')), 'desktop: the folder is still on disk');

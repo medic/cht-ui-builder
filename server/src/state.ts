@@ -78,6 +78,13 @@ interface RegistryFile {
   version: 1;
   projects: ProjectEntry[];
   deployConfig: DeployConfig | null;
+  /**
+   * Desktop only: the project a request with NO id resolves to — the folder
+   * the user last had open. `null` means the user closed it (the picker
+   * renders); `undefined` is a registry written before this field existed
+   * and falls back to the most recently opened entry.
+   */
+  lastOpenedId?: string | null;
 }
 
 export class NoProjectError extends Error {
@@ -111,6 +118,7 @@ async function readRegistry(userId: string): Promise<RegistryFile> {
       version: 1,
       projects: Array.isArray(parsed.projects) ? parsed.projects : [],
       deployConfig: parsed.deployConfig ?? null,
+      lastOpenedId: parsed.lastOpenedId,
     };
   } catch {
     return await migrateLegacyState(userId);
@@ -138,14 +146,16 @@ async function migrateLegacyState(userId: string): Promise<RegistryFile> {
     const reg: RegistryFile = { ...empty, deployConfig: legacy.deployConfig ?? null };
     if (legacy.projectPath && (await dirExists(legacy.projectPath))) {
       const now = new Date().toISOString();
-      reg.projects.push({
+      const entry: ProjectEntry = {
         id: newProjectId(),
         name: path.basename(legacy.projectPath),
         path: path.resolve(legacy.projectPath),
         source: 'local',
         createdAt: now,
         lastOpenedAt: now,
-      });
+      };
+      reg.projects.push(entry);
+      reg.lastOpenedId = entry.id;
     }
     await writeRegistry(userId, reg);
     return reg;
@@ -200,11 +210,13 @@ export async function registerProject(
     const existing = reg.projects.find((p) => path.resolve(p.path) === abs);
     if (existing) {
       existing.lastOpenedAt = now;
+      reg.lastOpenedId = existing.id;
       await writeRegistry(userId, reg);
       return existing;
     }
     const entry: ProjectEntry = { ...input, path: abs, id: newProjectId(), createdAt: now, lastOpenedAt: now };
     reg.projects.push(entry);
+    reg.lastOpenedId = entry.id;
     await writeRegistry(userId, reg);
     return entry;
   });
@@ -216,8 +228,23 @@ export async function touchProject(userId: string, projectId: string): Promise<P
     const p = reg.projects.find((x) => x.id === projectId);
     if (!p) return null;
     p.lastOpenedAt = new Date().toISOString();
+    reg.lastOpenedId = p.id;
     await writeRegistry(userId, reg);
     return p;
+  });
+}
+
+/**
+ * Desktop: "Change project". A request with no project id no longer resolves
+ * to anything, so a fresh tab (or a reload) lands on the picker instead of
+ * straight back inside the project just closed. Tabs that still name the
+ * project by id keep working.
+ */
+export async function clearLastOpened(userId: string): Promise<void> {
+  await serialised(userId, async () => {
+    const reg = await readRegistry(userId);
+    reg.lastOpenedId = null;
+    await writeRegistry(userId, reg);
   });
 }
 
@@ -247,6 +274,7 @@ export async function removeProject(
     const i = reg.projects.findIndex((x) => x.id === projectId);
     if (i === -1) return null;
     const [p] = reg.projects.splice(i, 1);
+    if (reg.lastOpenedId === projectId) reg.lastOpenedId = null;
     await writeRegistry(userId, reg);
     return p!;
   });
@@ -332,8 +360,15 @@ export async function projectEntryFor(req: FastifyRequest): Promise<ProjectEntry
   if (id) {
     entry = await getProject(userId, id);
   } else if (MODE === 'desktop') {
-    const all = await listProjects(userId);
-    entry = all.find((p) => p.exists) ?? null;
+    const reg = await readRegistry(userId);
+    if (reg.lastOpenedId === null) {
+      entry = null; // closed explicitly — the picker renders
+    } else if (reg.lastOpenedId) {
+      entry = reg.projects.find((p) => p.id === reg.lastOpenedId) ?? null;
+    } else {
+      const all = await listProjects(userId);
+      entry = all.find((p) => p.exists) ?? null;
+    }
   }
   if (!entry) return null;
   if (MODE === 'hosted' && !isInside(userProjectsDir(userId), entry.path)) return null;

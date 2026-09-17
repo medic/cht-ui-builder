@@ -97,6 +97,6 @@ error message store and show the URL with credentials stripped.
 ## Acceptance
 
 `node scripts/hosted-acceptance.mjs` spawns the built server in hosted and
-desktop mode and runs 43 assertions: two users, isolation by every route,
+desktop mode and runs 48 assertions: two users, isolation by every route,
 zip import/export, zip-slip refusal, delete-with-files, desktop fallbacks. It
 runs in CI on every push.

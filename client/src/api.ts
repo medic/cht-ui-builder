@@ -176,6 +176,9 @@ export const api = {
       body: JSON.stringify({ path }),
     }),
 
+  /** Desktop: forget the "last opened" fallback so a reload lands on the picker. Hosted: no-op. */
+  closeProject: () => jsonFetch<{ open: boolean }>('/api/project/close', { method: 'POST' }),
+
   renameProject: (id: string, name: string) =>
     jsonFetch<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'PATCH',

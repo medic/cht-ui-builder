@@ -11,7 +11,7 @@ Decisions in §4 were made by the PO on 2026-08-20. Built on 2026-09-04 — see 
 ## 0. What was built, and where it departs from the plan below
 
 Everything in §11 landed, in order. Verified by `scripts/hosted-acceptance.mjs`
-(43 assertions, both modes, in CI) and by running `validate-generated-forms` and
+(48 assertions, both modes, in CI) and by running `validate-generated-forms` and
 `validate-templates` inside the image.
 
 | plan item | landed as |
@@ -26,7 +26,7 @@ Everything in §11 landed, in order. Verified by `scripts/hosted-acceptance.mjs`
 | §8.4 registry | `GET /api/projects`, `POST /api/projects/open {id}`, `PATCH`/`DELETE /api/projects/:id` (`?files=1` deletes from disk only under the user's projects dir), `POST /api/templates/create {template, name}`. `POST /api/project/open {path}` remains, desktop-only. |
 | §8.5 import / export | `routes/transfer.ts`: `import-git` (shallow clone, size budget, project root found up to two levels down — nssd's `chis/`), `export-git` (add, commit, push `HEAD:refs/heads/<branch>`), `import-zip` (raw body, `adm-zip`, zip-slip refusal, common-root stripping, §6.5 exclusions), `export.zip`. Zip needed no multipart parser: the file is the request body. |
 | §8.6 client base URL | `VITE_API_BASE` read once in `api.ts`, which also adds `Authorization` and `x-project-id` to every call. Project id lives in **sessionStorage** — per tab — so two tabs edit two projects. |
-| §12 acceptance | Both legs, both in CI. `scripts/hosted-acceptance.mjs` at the API level (43 assertions; spawns the server in hosted AND desktop mode) covers isolation by every route, zip import/export and zip-slip refusal. `client/tests/hosted-authoring.spec.ts` under `playwright.hosted.config.ts` covers it in a browser against the built client on the server's own origin — sign up, start blank, land in the project, two tabs holding two projects, another user seeing none of it, sign out. The desktop specs still pass through the unchanged `#project-path` path. |
+| §12 acceptance | Both legs, both in CI. `scripts/hosted-acceptance.mjs` at the API level (48 assertions; spawns the server in hosted AND desktop mode) covers isolation by every route, zip import/export and zip-slip refusal. `client/tests/hosted-authoring.spec.ts` under `playwright.hosted.config.ts` covers it in a browser against the built client on the server's own origin — sign up, start blank, land in the project, two tabs holding two projects, another user seeing none of it, sign out. The desktop specs still pass through the unchanged `#project-path` path. |
 | client | `SignIn`, a project list on `ProjectPicker` (open / delete / start blank / template / import git / import zip; the path input stays in desktop mode), the wizard asks for a name instead of a folder when hosted, `ProjectTransfer` on the overview (download zip; push branch for git imports). |
 
 Still true from §10: last-write-wins for two people on one config; one API instance per volume; no deploy credentials reach the hosted server (rung 1 has no upload).

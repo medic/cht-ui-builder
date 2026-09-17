@@ -96,7 +96,7 @@ test('item 8 + W2 — bilingual task title reaches the INSTANCE via one-click de
   await fs.rm(PROJECT, { recursive: true, force: true });
   await page.request.post(`${API}/api/project/close`).catch(() => {});
   await page.goto('/');
-  await page.getByRole('button', { name: /Create new project/ }).click();
+  await page.getByRole('button', { name: /From a template/ }).click();
   const wizard = page.locator('.modal-wide');
   await wizard
     .locator('.template-card')

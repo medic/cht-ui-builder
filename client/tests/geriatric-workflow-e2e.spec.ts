@@ -233,7 +233,7 @@ test('workflow 1 — CHT-baseline project + assessment + 7 refer_* flags', async
 
   // New Project wizard → CHT baseline template.
   await page.goto('/');
-  await page.getByRole('button', { name: /Create new project/ }).click();
+  await page.getByRole('button', { name: /From a template/ }).click();
   const wizard = page.locator('.modal-wide');
   await wizard.locator('.template-card')
     .filter({ has: page.getByRole('heading', { name: 'CHT baseline' }) })
