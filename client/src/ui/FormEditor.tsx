@@ -110,6 +110,23 @@ export function FormEditor({ formId }: { formId: string }) {
   );
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
+  // Label columns are per-locale, so a seven-locale form (moh-nepal) renders
+  // seven label inputs on every row card. Authors work in one or two languages
+  // at a time, so the chip bar toggles which label::xx columns are rendered.
+  // View filter only: hidden locales stay in the form, are still saved, and
+  // still count towards the missing-translation cue on the columns on show.
+  // Lives here (not in SurveyTab) so the preview pane and the add-question
+  // picker honour the same set — a language hidden on the row cards used to
+  // reappear in both.
+  const [hiddenLocales, setHiddenLocales] = useState<ReadonlySet<string>>(() => new Set());
+  function toggleLocale(code: string) {
+    setHiddenLocales((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
   const [pendingSaveDiff, setPendingSaveDiff] = useState<XLSFormDiff | null>(null);
   // §H3 follow-up — click-to-jump channel. The Structural-issues popover lives in
   // the page header; clicking a row item sets `revealRowId`, which SurveyTab
@@ -324,6 +341,8 @@ export function FormEditor({ formId }: { formId: string }) {
             form={form}
             patch={patch}
             undo={undo}
+            hiddenLocales={hiddenLocales}
+            onToggleLocale={toggleLocale}
             getSnapshotId={() => formHistory.currentSnapshotId}
             jumpTo={formHistory.jumpTo}
             violationsByRow={violationsByRow}
@@ -337,7 +356,7 @@ export function FormEditor({ formId }: { formId: string }) {
           />
           {showPreview && (
             <div className="preview-pane">
-              <FormPreview form={form} />
+              <FormPreview form={form} hiddenLocales={hiddenLocales} />
             </div>
           )}
         </div>
@@ -484,6 +503,10 @@ function SurveyTab(props: {
   form: XLSForm;
   patch: (next: XLSForm) => void;
   undo: () => void;
+  /** Languages the author has collapsed away in the chip bar (owned by
+   *  FormEditor so the preview pane shares it). */
+  hiddenLocales: ReadonlySet<string>;
+  onToggleLocale: (code: string) => void;
   /** Capture the current snapshot id so toast Undo can jump back exactly. */
   getSnapshotId: () => number;
   jumpTo: (id: number) => void;
@@ -517,20 +540,15 @@ function SurveyTab(props: {
 }) {
   const { form, patch, violationsByRow, revealRowId, onRevealConsumed } = props;
   const undo = props.undo;
-  // Label columns are per-locale, so a seven-locale form (moh-nepal) renders
-  // seven label inputs on every row card. Authors work in one or two languages
-  // at a time, so the chip bar toggles which label::xx columns are rendered.
-  // View filter only: hidden locales stay in the form, are still saved, and
-  // still count towards the missing-translation cue on the columns on show.
-  const [hiddenLocales, setHiddenLocales] = useState<ReadonlySet<string>>(() => new Set());
-  function toggleLocale(code: string) {
-    setHiddenLocales((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  }
+  const { hiddenLocales } = props;
+  const toggleLocale = props.onToggleLocale;
+  // The add-question picker asks for one label per language; only the
+  // languages on show get an input. Every active locale is still seeded on
+  // commit ('' when not typed), so hiding a language never drops its column.
+  const allLabelLocales =
+    form.surveyHeaders.labelLocales.length > 0 ? form.surveyHeaders.labelLocales : ['en'];
+  const shownLabelLocales = allLabelLocales.filter((l) => !hiddenLocales.has(l));
+  const pickerLocales = shownLabelLocales.length > 0 ? shownLabelLocales : allLabelLocales;
   // §A4 surfaces structural-violation refusals via the shared error
   // toast so the user sees why a move was blocked.
   const setError = useApp((s) => s.setError);
@@ -1462,14 +1480,10 @@ function SurveyTab(props: {
           sectionMode={pickerSectionMode}
           formCategory={props.formCategory}
           existingLists={existingListNames}
-          // Wave 2 §4 — thread the form's active locales so the picker
-          // renders one label input per locale at add-time. Fallback to
-          // `en` if the form has never declared any (blank scaffolds).
-          labelLocales={
-            form.surveyHeaders.labelLocales.length > 0
-              ? form.surveyHeaders.labelLocales
-              : ['en']
-          }
+          // Wave 2 §4 — one label input per locale at add-time, minus the
+          // languages hidden in the chip bar. Falls back to `en` if the form
+          // has never declared any (blank scaffolds).
+          labelLocales={pickerLocales}
           hideNameField={Boolean(pickerEditRowId)}
           initialName={
             pickerEditRowId

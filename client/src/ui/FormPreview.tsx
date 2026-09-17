@@ -16,10 +16,17 @@ import { isStructural, type SurveyRow, type XLSForm } from '@cht-ui/shared';
 
 interface Props {
   form: XLSForm;
+  /** Languages collapsed away in the editor's chip bar; the preview offers
+   *  only the rest, so a hidden language does not reappear here. */
+  hiddenLocales?: ReadonlySet<string>;
 }
 
-export function FormPreview({ form }: Props) {
+export function FormPreview({ form, hiddenLocales }: Props) {
   const [locale, setLocale] = useState<string>(form.locales[0] ?? 'en');
+  const shown = form.locales.filter((l) => !hiddenLocales?.has(l));
+  // Hiding every language would leave nothing to preview in; show them all then.
+  const visibleLocales = shown.length > 0 ? shown : form.locales;
+  const current = visibleLocales.includes(locale) ? locale : (visibleLocales[0] ?? locale);
   const [hideHidden, setHideHidden] = useState(false);
   const layout = useMemo(() => previewLayout(form.survey), [form.survey]);
   const hiddenCount = useMemo(
@@ -46,10 +53,10 @@ export function FormPreview({ form }: Props) {
         <strong>Preview</strong>
         <span className="muted">— stacked, no logic</span>
         <span className="row gap">
-          {form.locales.map((l) => (
+          {visibleLocales.map((l) => (
             <button
               key={l}
-              className={l === locale ? 'active' : 'link'}
+              className={l === current ? 'active' : 'link'}
               onClick={() => setLocale(l)}
             >
               {l}
@@ -75,12 +82,12 @@ export function FormPreview({ form }: Props) {
           if (item.kind === 'group-header') {
             return (
               <div key={`g-${idx}`} className={`preview-group-header depth-${item.depth}`}>
-                {item.row.labels[locale] ?? item.row.name}
+                {item.row.labels[current] ?? item.row.name}
               </div>
             );
           }
           if (item.kind === 'group-footer') return null;
-          return <PreviewField key={item.row.rowId} row={item.row} locale={locale} />;
+          return <PreviewField key={item.row.rowId} row={item.row} locale={current} />;
         })}
       </div>
     </div>
