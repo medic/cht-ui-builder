@@ -73,13 +73,26 @@ await writeXlsx(join(root, 'forms', 'contact', 'person.xlsx'), {
 //     `form-editing.spec.ts` asserts an exact "ne: 2 missing" count.
 //   - `gravidity` (integer) — an untranslated row, so the `ne` "missing"
 //     counter on the Translate tab is non-zero and observable.
+//   - `patient_sex` / `patient_id` (calculate) — the HARVEST rows, placed
+//     immediately after `end group inputs` exactly where `insertContactFieldRef`
+//     puts them, and named by `deriveHarvestName` (`_id` loses its underscore,
+//     so it lands on `patient_id`). These are what the field pickers actually
+//     offer: every row INSIDE the `inputs` block is withheld
+//     (`inputsBlockRowIds`), because `${x}` resolves by name across the whole
+//     survey and that block deliberately reuses names from outside it.
+//     `patient_sex` reads a contact select, so it choice-upgrades to the
+//     person form's male/female/other; `patient_id` reads `_id`, which no
+//     contact form declares as a select, so it stays "unknown" kind. The
+//     condition-builder specs need exactly that pair — one choice field and
+//     one unknown field, both reachable.
 //
 // KEEP `gravidity` THE ONLY `integer` ROW and `lmp_date` THE ONLY `date` ROW —
 // condition-builder.spec.ts resolves both by their unique raw type chip.
 //
 // Two locales (`label::en` + `label::ne`) so label + translation editing is
-// testable; `sex` still flows in via `inputs/contact/sex` so the
-// condition-builder dropdown spec keeps working unchanged.
+// testable. The harvest rows carry no label on purpose: the Translate tab
+// filters out label-less rows, so they stay out of the "ne: N missing" count
+// that `form-editing.spec.ts` pins.
 await writeXlsx(join(root, 'forms', 'app', 'pregnancy.xlsx'), {
   survey: [
     ['type', 'name', 'label::en', 'label::ne', 'calculation', 'relevant', 'required'],
@@ -89,6 +102,8 @@ await writeXlsx(join(root, 'forms', 'app', 'pregnancy.xlsx'), {
     ['calculate', '_id', '', '', '../inputs/contact/_id', '', ''],
     ['end group', '', '', '', '', '', ''],
     ['end group', '', '', '', '', '', ''],
+    ['calculate', 'patient_sex', '', '', '../inputs/contact/sex', '', ''],
+    ['calculate', 'patient_id', '', '', '../inputs/contact/_id', '', ''],
     ['date', 'lmp_date', 'Last menstrual period', 'अन्तिम महिनावारी', '', '', 'yes'],
     ['note', 'lmp_note', 'LMP recorded', '', '', "${lmp_date} != ''", ''],
     ['select_multiple danger_signs', 'danger_signs', 'Danger signs', 'खतराका लक्षण', '', '', ''],

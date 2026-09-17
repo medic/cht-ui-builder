@@ -1,10 +1,16 @@
 /**
  * Slice 1 of the condition-builder plan (docs/plans/condition-builder.md).
  *
- * Acceptance: when an app form references a contact-injected field
- * (e.g. `inputs/contact/sex` via a calculate), the unified condition
- * builder's value cell must render as a populated `<select>` of the
- * contact form's choices — NOT a free-text input.
+ * Acceptance: when an app form harvests a contact-injected field (the
+ * `patient_sex` calculate reading `../inputs/contact/sex`), the unified
+ * condition builder's value cell must render as a populated `<select>` of
+ * the contact form's choices — NOT a free-text input.
+ *
+ * The harvest row is the anchor, not the row inside `inputs/contact`: every
+ * row in that block is withheld from the field pickers, because `${x}`
+ * resolves by name across the whole survey and the block deliberately reuses
+ * names from outside it. So the harvest calculate is the only route an
+ * author has, and these tests hold it to the same standard.
  *
  * Runs against the committed `client/tests/fixtures/mini-config` project
  * by default (no env export needed).
@@ -49,7 +55,7 @@ test('condition builder — value cell is a populated dropdown for contact-injec
   // are `.ref-chip-select` in DOM order.
   const dropdowns = strip.locator('.ref-chip-select');
   await dropdowns.nth(0).selectOption('relevant');
-  await dropdowns.nth(1).selectOption('sex');
+  await dropdowns.nth(1).selectOption('patient_sex');
   await dropdowns.nth(2).selectOption('='); // comparison op → needs a value
 
   // The PR's deliverable: the value cell is a populated <select>,
@@ -88,10 +94,10 @@ test('condition builder — fields without any choices source still show free-te
   const strip = lmpRow.locator('.cond-strip-unified');
   const dropdowns = strip.locator('.ref-chip-select');
   await dropdowns.nth(0).selectOption('relevant');
-  // `_id` is a calculate from `inputs/contact/_id` — earlier in the survey
-  // than `lmp_date` and has no choices in either form, so the value cell
-  // should fall back to the free-text input.
-  await dropdowns.nth(1).selectOption('_id');
+  // `patient_id` harvests `../inputs/contact/_id` — earlier in the survey
+  // than `lmp_date`, and no contact form declares `_id` as a select, so it
+  // resolves to no choices and the value cell falls back to free text.
+  await dropdowns.nth(1).selectOption('patient_id');
   await dropdowns.nth(2).selectOption('=');
 
   await expect(strip.locator('input.cond-value-input')).toBeVisible();
@@ -122,7 +128,8 @@ async function buildClause(
   await dropdowns.nth(1).selectOption(field);
   await dropdowns.nth(2).selectOption(op);
   // Use the free-text input when the field has no choices (the case for
-  // _id / sex in our fixture when used as a value rather than a key).
+  // `patient_id`, which harvests `_id` — no contact form declares it as a
+  // select, so there is nothing to populate a dropdown from).
   const valueSelect = strip.locator('select[title="Pick a value from this field\'s choices"]');
   if (await valueSelect.count()) {
     await valueSelect.selectOption(value);
@@ -150,12 +157,13 @@ test('condition builder — group happy path: build flat AND, group, add OR-join
   // Pick column: relevant.
   await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
 
-  // Build clause 1: ${sex} = 'female'  (sex has choices from contact form).
-  await buildClause(strip, 'sex', '=', 'female');
+  // Build clause 1: ${patient_sex} = 'female' (choices arrive from the
+  // contact form, via the harvest calculate's `../inputs/contact/sex`).
+  await buildClause(strip, 'patient_sex', '=', 'female');
   await strip.getByRole('button', { name: '+ add another rule' }).click();
 
-  // Build clause 2: ${_id} = 'x' — joins by AND-locked (default).
-  await buildClause(strip, '_id', '=', 'x');
+  // Build clause 2: ${patient_id} = 'x' — joins by AND-locked (default).
+  await buildClause(strip, 'patient_id', '=', 'x');
   await strip.getByRole('button', { name: '+ add another rule' }).click();
 
   // ( group these ) — collect the two flat clauses into subgroup 1.
@@ -179,7 +187,7 @@ test('condition builder — group happy path: build flat AND, group, add OR-join
   ).toHaveAttribute('aria-pressed', 'true');
 
   // Build clause 3 inside subgroup 2.
-  await buildClause(strip, 'sex', '=', 'male');
+  await buildClause(strip, 'patient_sex', '=', 'male');
   await strip.getByRole('button', { name: '+ add another rule' }).click();
 
   // + insert writes the full grouped chain to row.extras.relevant. The
@@ -204,7 +212,7 @@ test('condition builder — group happy path: build flat AND, group, add OR-join
     hasText: 'Show this question when…',
   });
   const rawValue = await relevantField.locator('textarea, input').first().inputValue();
-  expect(rawValue).toBe(`(\${sex} = 'female' and \${_id} = 'x') or \${sex} = 'male'`);
+  expect(rawValue).toBe(`(\${patient_sex} = 'female' and \${patient_id} = 'x') or \${patient_sex} = 'male'`);
 });
 
 test('condition builder — no UI sequence can write a flat-mixed value (§3.7 structural)', async ({
@@ -223,7 +231,7 @@ test('condition builder — no UI sequence can write a flat-mixed value (§3.7 s
   await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
 
   // Build clause 1 (AND-default).
-  await buildClause(strip, 'sex', '=', 'female');
+  await buildClause(strip, 'patient_sex', '=', 'female');
   await strip.getByRole('button', { name: '+ add another rule' }).click();
 
   // The connector picker is disabled after the first commit and its
@@ -238,7 +246,7 @@ test('condition builder — no UI sequence can write a flat-mixed value (§3.7 s
   );
 
   // Build a second clause and commit it — connector remains AND-locked.
-  await buildClause(strip, '_id', '=', 'x');
+  await buildClause(strip, 'patient_id', '=', 'x');
   await strip.getByRole('button', { name: '+ add another rule' }).click();
 
   // + insert; assert the resulting raw `relevant` value DOES NOT carry
@@ -259,8 +267,8 @@ test('condition builder — no UI sequence can write a flat-mixed value (§3.7 s
  * Plan v0.3 §6 pins six Playwright cases. All anchor on the `gravidity`
  * row (the only `integer` row in the fixture) so `earlierFields` carries
  * a useful variety:
- *   - `sex` (calculate, choice-upgraded via fieldChoices)
- *   - `_id` (calculate, no choices → unknown)
+ *   - `patient_sex` (harvest calculate, choice-upgraded via fieldChoices)
+ *   - `patient_id` (harvest calculate, no choices → unknown)
  *   - `lmp_date` (date)
  *   - `lmp_note` (note → text)
  *   - `danger_signs` (select_multiple → choice)
@@ -304,11 +312,11 @@ test('v0.3 — op-first filtering: picking `is more than` groups date/numeric ty
 
   const fieldSelect = dropdowns.nth(1);
   const snap = await optgroupSnapshot(fieldSelect);
-  // `lmp_date` (date) typical; `_id` (unknown) always-pass; `lmp_note`
-  // (text) atypical for ordering ops; choice fields (sex, danger_signs)
-  // atypical too.
+  // `lmp_date` (date) typical; `patient_id` (unknown) always-pass;
+  // `lmp_note` (text) atypical for ordering ops; choice fields
+  // (`patient_sex`, danger_signs) atypical too.
   expect(snap['Typical for this check']).toContain('lmp_date');
-  expect(snap['Typical for this check']).toContain('_id');
+  expect(snap['Typical for this check']).toContain('patient_id');
   expect(snap['Other fields']).toContain('lmp_note');
   // Atypical field is STILL selectable (never hard-hidden).
   await fieldSelect.selectOption('lmp_note');
@@ -387,14 +395,15 @@ test('v0.3 — `includes` (selected) narrows field list to choice incl. contact-
 
   const fieldSelect = dropdowns.nth(1);
   const snap = await optgroupSnapshot(fieldSelect);
-  // `sex` is choice-upgraded via fieldChoices (contact-injected select).
-  expect(snap['Typical for this check']).toContain('sex');
+  // `patient_sex` is choice-upgraded via fieldChoices — its calculation
+  // resolves through to the contact form's `sex` select.
+  expect(snap['Typical for this check']).toContain('patient_sex');
   expect(snap['Typical for this check']).toContain('danger_signs');
   // Non-choice rows (date, text) appear under "Other fields", still selectable.
   expect(snap['Other fields']).toContain('lmp_date');
 });
 
-test('v0.3 — unknown-kind field (`_id`) is always-pass: reachable under ordering op `>`', async ({
+test('v0.3 — unknown-kind field (`patient_id`) is always-pass: reachable under ordering op `>`', async ({
   page,
 }) => {
   await page.goto('/');
@@ -410,8 +419,9 @@ test('v0.3 — unknown-kind field (`_id`) is always-pass: reachable under orderi
 
   const fieldSelect = dropdowns.nth(1);
   const snap = await optgroupSnapshot(fieldSelect);
-  // `_id` is a `calculate` with no fieldChoices → unknown → always-pass.
-  expect(snap['Typical for this check']).toContain('_id');
+  // `patient_id` is a `calculate` whose harvested field has no choices →
+  // unknown kind → always-pass.
+  expect(snap['Typical for this check']).toContain('patient_id');
 });
 
 test('v0.3 — relabeled op dropdown saves byte-identical canonical XPath (no label leakage)', async ({
@@ -429,8 +439,8 @@ test('v0.3 — relabeled op dropdown saves byte-identical canonical XPath (no la
   const strip = lmpRow.locator('.cond-strip-unified');
   await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
 
-  // Build `${sex} = 'female'` using the relabeled dropdown ("equals value").
-  await buildClause(strip, 'sex', '=', 'female');
+  // Build `${patient_sex} = 'female'` using the relabeled dropdown ("equals value").
+  await buildClause(strip, 'patient_sex', '=', 'female');
   await strip.getByRole('button', { name: '+ insert' }).click();
 
   // The persisted raw XPath uses the canonical `=` token, not "equals".
@@ -438,7 +448,7 @@ test('v0.3 — relabeled op dropdown saves byte-identical canonical XPath (no la
     hasText: 'Show this question when…',
   });
   const rawValue = await relevantField.locator('textarea, input').first().inputValue();
-  expect(rawValue).toBe(`\${sex} = 'female'`);
+  expect(rawValue).toBe(`\${patient_sex} = 'female'`);
   expect(rawValue).not.toMatch(/equals|includes|is more than|has an answer/i);
 });
 
@@ -502,7 +512,7 @@ test('punch-list B2 — × start over saves byte-identical row.extras[relevant] 
     const setupStrip = dateRow.locator('.cond-strip-unified');
     await expect(setupStrip).toBeVisible();
     await setupStrip.locator('.ref-chip-select').nth(0).selectOption('relevant');
-    await buildClause(setupStrip, 'sex', '=', 'female');
+    await buildClause(setupStrip, 'patient_sex', '=', 'female');
     await setupStrip.getByRole('button', { name: '+ insert' }).click();
 
     // Save the seeded relevant.
@@ -538,9 +548,9 @@ test('punch-list B2 — × start over saves byte-identical row.extras[relevant] 
     // rule` push updates reducer state only; the value column is also
     // reducer-state, never row.extras. (`sex` and `_id` are the only
     // earlierFields reachable for the lmp_date row.)
-    await buildClause(strip, 'sex', '=', 'male');
+    await buildClause(strip, 'patient_sex', '=', 'male');
     await strip.getByRole('button', { name: '+ add another rule' }).click();
-    await buildClause(strip, '_id', '=', 'x');
+    await buildClause(strip, 'patient_id', '=', 'x');
     await strip.getByRole('button', { name: '+ add another rule' }).click();
 
     // Discard. §3.5 contract: zero call to setColumn/setExtra.

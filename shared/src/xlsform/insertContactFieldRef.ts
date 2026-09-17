@@ -151,6 +151,28 @@ export function deriveHarvestName(contactField: string): string {
 }
 
 /**
+ * The inverse of the `targetCalc` spelling in `insertContactFieldRef`: given a
+ * row's `calculation` cell, return the contact field it harvests, or `null`
+ * when the cell is anything else.
+ *
+ * This exists because the harvest row is the only sanctioned way to reach a
+ * contact field — rows inside the `inputs` block are withheld from the field
+ * pickers (`inputsBlockRowIds`), since `${x}` resolves by NAME across the whole
+ * survey and the block deliberately reuses names from outside it. So anything
+ * downstream asking "what is this field, really?" has to read through the
+ * calculation: the harvest row is named `patient_<field>`, while the choices
+ * that describe it are keyed by the contact form's own `<field>`. Without this
+ * the sanctioned path reaches the picker but arrives with no choice list.
+ *
+ * Kept next to `deriveHarvestName` on purpose — the two spellings of one idiom
+ * have to change together.
+ */
+export function contactFieldFromCalculation(calculation: string | undefined): string | null {
+  const m = (calculation ?? '').trim().match(/^\.\.\/inputs\/contact\/([A-Za-z_][\w.-]*)$/);
+  return m ? m[1]! : null;
+}
+
+/**
  * Locate the survey index directly after the outermost `end group inputs`.
  * Returns `-1` if the survey has no top-level `inputs` block — in which
  * case the caller falls back to appending at the end of the survey.

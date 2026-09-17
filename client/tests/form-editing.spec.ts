@@ -459,6 +459,16 @@ test('§B2 — ungroup round-trips through the UI + on-disk form', async ({
     });
     expect(opened.ok()).toBeTruthy();
 
+    // The fixture's own row count, read before we touch anything. Derived,
+    // never hardcoded: this test twice asserted a literal that went stale the
+    // moment a row was added to the fixture (c66cfcb's `chair_rise`, then the
+    // `patient_*` harvest rows). What it actually cares about is the DELTA —
+    // ungroup removes the two shell rows and nothing else.
+    const baseline = await request.get('http://127.0.0.1:5174/api/forms/app:pregnancy');
+    const baselineRows = (
+      (await baseline.json()) as { form: { survey: unknown[] } }
+    ).form.survey.length;
+
     await page.goto('/');
     await expect(page.getByText(path.basename(tmpProject)).first()).toBeVisible();
     await page.locator('.nav-item', { hasText: 'Forms' }).click();
@@ -493,11 +503,8 @@ test('§B2 — ungroup round-trips through the UI + on-disk form', async ({
     const beforeBody = (await before.json()) as {
       form: { survey: Array<{ name: string; type: string }> };
     };
-    // 11 fixture rows + 2 triage begin/end. The fixture gained `chair_rise`
-    // (a select_one pass_fail) in c66cfcb and this count was not updated with
-    // it, so assert against the parsed fixture rather than a literal that goes
-    // stale the next time a row is added.
-    expect(beforeBody.form.survey.length).toBe(13);
+    // The fixture's rows plus the triage begin/end pair we just added.
+    expect(beforeBody.form.survey.length).toBe(baselineRows + 2);
 
     // Ungroup the triage container via its header link. The shared
     // planUngroup decision returned `kind:'ok'` and the inline patch
@@ -527,10 +534,10 @@ test('§B2 — ungroup round-trips through the UI + on-disk form', async ({
     // Triage's begin and end are gone (no other group shares the name).
     const remainingTriage = afterBody.form.survey.filter((r) => r.name === 'triage');
     expect(remainingTriage).toHaveLength(0);
-    // Row count dropped by exactly 2 (the begin + the end shell rows).
-    // Back to the fixture's own 11 rows: ungrouping removed only the two
-    // begin/end shell rows, which is the whole point of the assertion.
-    expect(afterBody.form.survey.length).toBe(11);
+    // Row count dropped by exactly 2 (the begin + the end shell rows), i.e.
+    // back to the fixture's own count: ungrouping removed the two shell rows
+    // and nothing else, which is the whole point of the assertion.
+    expect(afterBody.form.survey.length).toBe(baselineRows);
   } finally {
     await fs.rm(tmpProject, { recursive: true, force: true });
   }

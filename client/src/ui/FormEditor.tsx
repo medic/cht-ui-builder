@@ -73,7 +73,9 @@ import {
   type ConditionColumn,
   type ReportFieldChoice,
   type Subgroup,
-  inputsBlockRowIds,} from '@cht-ui/shared';
+  inputsBlockRowIds,
+  contactFieldFromCalculation,
+} from '@cht-ui/shared';
 import { api } from '../api.js';
 import { useApp } from '../state/store.js';
 import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
@@ -2774,6 +2776,22 @@ function buildFieldChoices(
 ): Record<string, string[]> {
   // Start from project-level context (contact-form selects).
   const out: Record<string, string[]> = { ...(contactFieldChoices ?? {}) };
+
+  // Alias each harvest calculate onto the contact field it reads. The map
+  // above is keyed by the CONTACT form's row name (`sex`), but the row an
+  // author can actually pick is the harvest calculate — named `patient_sex`,
+  // sitting outside the `inputs` block, because everything inside that block
+  // is withheld from the pickers (`inputsBlockRowIds`). Without this alias the
+  // one sanctioned route to a contact field reaches the field list and then
+  // falls back to a free-text value cell, which is exactly the typo surface
+  // the choice dropdown exists to remove.
+  for (const r of survey) {
+    if (!r.name) continue;
+    const field = contactFieldFromCalculation(r.extras['calculation']);
+    if (!field) continue;
+    const vals = contactFieldChoices?.[field];
+    if (vals && vals.length > 0) out[r.name] = vals;
+  }
 
   // Overlay form-local selects so this form's own definitions win on collision.
   const listToValues = new Map<string, string[]>();
