@@ -73,6 +73,28 @@ function isAllowedGitUrl(url: string): boolean {
 
 const BRANCH_RE = /^(?!.*\.\.)(?!\/)(?!.*\/$)(?!.*@\{)[A-Za-z0-9._\-/]+$/;
 
+/**
+ * The remote's default branch from `git ls-remote --symref origin HEAD`
+ * output (`ref: refs/heads/main\tHEAD`). Null when the remote reports none,
+ * e.g. an empty repository.
+ */
+export function parseDefaultBranch(lsRemoteOut: string): string | null {
+  const m = /^ref:\s*refs\/heads\/(\S+)\s+HEAD\s*$/m.exec(lsRemoteOut);
+  return m ? m[1]! : null;
+}
+
+/**
+ * Ask the remote itself, not the clone: the clone is `--single-branch` (so
+ * `origin/HEAD` may be absent) and the default may have been renamed since.
+ */
+export async function remoteDefaultBranch(
+  repo: string,
+): Promise<{ ok: true; branch: string | null } | { ok: false; out: string }> {
+  const r = await runGit(['ls-remote', '--symref', 'origin', 'HEAD'], repo);
+  if (r.code !== 0) return { ok: false, out: r.out };
+  return { ok: true, branch: parseDefaultBranch(r.out) };
+}
+
 async function dirSize(dir: string): Promise<number> {
   let total = 0;
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -263,6 +285,20 @@ export async function registerTransferRoutes(app: FastifyInstance): Promise<void
       if (!BRANCH_RE.test(branch)) return fail(reply, 400, 'Enter a branch name (letters, digits, . _ - /).');
       const message = (req.body?.message ?? '').trim() || 'Edited with CHT UI Builder';
       const repo = entry.repoRoot;
+      // Export is "push a branch to review and merge" — never the default branch,
+      // whatever it is called. Checked before committing so a refusal leaves
+      // the clone untouched; fails closed when the remote can't be asked.
+      const def = await remoteDefaultBranch(repo);
+      if (!def.ok) {
+        return fail(reply, 400, `Could not read the repository's default branch:\n${def.out.trim()}`);
+      }
+      if (def.branch !== null && def.branch === branch) {
+        return fail(
+          reply,
+          400,
+          `"${branch}" is the repository's default branch. Push to a new branch and merge it after review.`,
+        );
+      }
       const identity = [
         '-c',
         'user.name=CHT UI Builder',
