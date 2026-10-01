@@ -487,6 +487,8 @@ function relevantToHumanLines(cond: import('@cht-ui/shared').ParsedExpression): 
         return `${r.negated ? 'NOT ' : ''}${r.field} includes "${r.value}"`;
       case 'answered':
         return r.negated ? `${r.field} is empty` : `${r.field} is answered`;
+      case 'truthy':
+        return r.negated ? `${r.field} is not selected` : `${r.field} has an answer`;
       case 'age':
         return `age of ${r.field} ${r.op} ${r.value} years`;
       case 'date_offset':
