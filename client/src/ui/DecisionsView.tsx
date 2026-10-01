@@ -25,6 +25,7 @@ import {
   type AppliesIfRule,
   type ContextRule,
   type ParsedCalculation,
+  serializeRule,
 } from '@cht-ui/shared';
 import { api } from '../api.js';
 import { useApp } from '../state/store.js';
@@ -489,6 +490,14 @@ function relevantToHumanLines(cond: import('@cht-ui/shared').ParsedExpression): 
         return r.negated ? `${r.field} is empty` : `${r.field} is answered`;
       case 'truthy':
         return r.negated ? `${r.field} is not selected` : `${r.field} has an answer`;
+      case 'expr-comparison':
+      case 'predicate':
+      case 'not-group':
+        // T9a — rules about the answer itself; shown as written until 9e
+        // gives them presets.
+        return serializeRule(r);
+      case 'always-true':
+        return 'always passes (no rule)';
       case 'age':
         return `age of ${r.field} ${r.op} ${r.value} years`;
       case 'date_offset':

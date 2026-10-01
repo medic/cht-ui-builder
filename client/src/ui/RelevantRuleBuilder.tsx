@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import {
   parseRelevant,
   serializeRelevant,
+  serializeRule,
   type ContextWrapper,
   type DateOffsetComparator,
   type DateOffsetDirection,
@@ -601,6 +602,29 @@ function RuleRow(props: {
           />
           string
         </label>
+        <button className="link danger" onClick={props.onRemove}>×</button>
+      </div>
+    );
+  }
+  if (
+    rule.kind === 'expr-comparison' ||
+    rule.kind === 'predicate' ||
+    rule.kind === 'not-group' ||
+    rule.kind === 'always-true'
+  ) {
+    // T9a (#14): rules about the answer itself (`. >= 0`, `regex(., '…')`,
+    // `not(selected(., 'none') and …)`, `true`) parse structurally now but
+    // have no visual row until the Validation panel (9e). Show the text the
+    // author wrote; an edit turns it into a raw fragment, exactly as before.
+    return (
+      <div className="row gap rule-row">
+        <input
+          value={serializeRule(rule)}
+          onChange={(e) => props.onChange({ kind: 'raw', text: e.target.value })}
+          placeholder="expression"
+          className="raw-rule-input"
+          aria-label="Rule about this answer"
+        />
         <button className="link danger" onClick={props.onRemove}>×</button>
       </div>
     );

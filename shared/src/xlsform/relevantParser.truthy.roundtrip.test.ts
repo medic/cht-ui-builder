@@ -48,10 +48,16 @@ test('truthy: chains with other kinds and inside a grouped expression', () => {
   assert.equal(serializeAnyParsed(g), grouped);
 });
 
-test('truthy: spacing-divergent spellings stay raw and byte-identical', () => {
-  for (const src of ['${ f }', 'not( ${f} )', 'not(${f} )', 'not (${f})', 'NOT(${f})']) {
+test('truthy: spacing-divergent spellings never become a truthy rule, and stay byte-identical', () => {
+  // `${ f }` is outside every grammar and stays raw. The `not( … )` variants
+  // parse as a negated group carrying the author's text (T9a, #14); either
+  // way nothing is rewritten and none of them is mistaken for `not(${f})`.
+  const raw = parseRelevant('${ f }');
+  assert.equal(raw.isRawFallback, true);
+  assert.equal(serializeRelevant(raw), '${ f }');
+  for (const src of ['not( ${f} )', 'not(${f} )', 'not (${f})', 'NOT(${f})']) {
     const parsed = parseRelevant(src);
-    assert.equal(parsed.isRawFallback, true, `expected raw for: ${src}`);
+    assert.notEqual(parsed.rules[0]?.kind, 'truthy', `must not be truthy: ${src}`);
     assert.equal(serializeRelevant(parsed), src);
   }
 });

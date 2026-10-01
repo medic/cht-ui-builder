@@ -506,7 +506,7 @@ function clauseToRule(c: Clause): Rule {
     const parsed = parseRelevant(c.source);
     const sole = parsed.rules.length === 1 ? parsed.rules[0] : undefined;
     if (sole && !parsed.isRawFallback) {
-      const projected = ruleToClause(sole);
+      const projected = projectRule(sole);
       if (
         projected &&
         projected.field === c.field &&
@@ -517,6 +517,11 @@ function clauseToRule(c: Clause): Rule {
       }
     }
   }
+  return clauseToCanonicalRule(c);
+}
+
+/** The rule the builder emits for a clause it built itself (`${field}` spelling). */
+function clauseToCanonicalRule(c: Clause): Rule {
   if (c.op === 'today') return { kind: 'raw', text: 'today()' };
   if (c.op === 'ref') return { kind: 'truthy', field: c.field, negated: false };
   if (c.op === 'not') return { kind: 'truthy', field: c.field, negated: true };
@@ -537,6 +542,23 @@ function clauseToRule(c: Clause): Rule {
 }
 
 function ruleToClause(r: Rule): Clause | null {
+  const projected = projectRule(r);
+  if (projected === null) return null;
+  // Keep the author's spelling whenever the canonical emission for this
+  // projection would differ: `${f} != ''` (answered) and every `../field`
+  // rule (T9a) read as the same clause as their `${f}` counterparts but
+  // must save back byte-identical when the user never touched them.
+  const authored = serializeRelevant({ combinator: 'and', rules: [r], isRawFallback: false });
+  const canonical = serializeRelevant({
+    combinator: 'and',
+    rules: [clauseToCanonicalRule(projected)],
+    isRawFallback: false,
+  });
+  return authored === canonical ? projected : { ...projected, source: authored };
+}
+
+/** The clause a rule reads as, ignoring spelling. Null when there is no 1:1. */
+function projectRule(r: Rule): Clause | null {
   if (r.kind === 'comparison') {
     return { field: r.field, op: r.op, value: r.value };
   }
@@ -551,17 +573,11 @@ function ruleToClause(r: Rule): Clause | null {
     return { field: r.field, op: r.negated ? 'not' : 'ref', value: '' };
   }
   if (r.kind === 'answered') {
-    // `${f} != ''` reads as "has an answer" and `${f} = ''` as "is not
-    // selected" — the same projection as `truthy` — but the spelling is
-    // kept on the clause so an unedited reopen writes back the same bytes.
-    return {
-      field: r.field,
-      op: r.negated ? 'not' : 'ref',
-      value: '',
-      source: serializeRelevant({ combinator: 'and', rules: [r], isRawFallback: false }),
-    };
+    // `${f} != ''` reads as "has an answer" and `${f} = ''` as "is not selected".
+    return { field: r.field, op: r.negated ? 'not' : 'ref', value: '' };
   }
-  // date_offset / age / contact-* / raw don't have a 1:1 in the Clause shape.
+  // date_offset / age / contact-* / the T9a `.`-subject kinds / raw don't
+  // have a 1:1 in the Clause shape (the `.` kinds get theirs in 9e / 9f).
   return null;
 }
 

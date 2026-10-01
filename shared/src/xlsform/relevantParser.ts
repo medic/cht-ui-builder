@@ -22,9 +22,32 @@ import {
   emitContactInput,
   emitContactSummary,
 } from './calcReference.js';
+import {
+  parseOperand,
+  serializeOperand,
+  type Operand,
+  type RefSpelling,
+} from './operand.js';
+
+export type { Operand, RefSpelling, BinaryOp } from './operand.js';
+export {
+  parseOperand,
+  serializeOperand,
+  isSelfOperand,
+  operandFields,
+  KNOWN_FUNCTIONS,
+} from './operand.js';
 
 export type Operator = '=' | '!=' | '>' | '<' | '>=' | '<=';
 export type Combinator = 'and' | 'or';
+
+/**
+ * How a field-subject rule spells its reference. Absent means `${field}`;
+ * `'relative'` means the author wrote `../field`, which real forms use as
+ * an alias (T9a, #14). The spelling is re-emitted exactly as written and
+ * never rewritten in either direction.
+ */
+export type FieldRefSpelling = RefSpelling;
 
 export interface ComparisonRule {
   kind: 'comparison';
@@ -33,6 +56,8 @@ export interface ComparisonRule {
   value: string;
   /** True if value should be wrapped in quotes when serialized back. */
   valueIsString: boolean;
+  /** `'relative'` when the subject was written `../field`. See {@link FieldRefSpelling}. */
+  refSpelling?: FieldRefSpelling;
 }
 
 export interface SelectedRule {
@@ -41,6 +66,8 @@ export interface SelectedRule {
   value: string;
   /** If true, the rule is `not(selected(...))`. */
   negated: boolean;
+  /** `'relative'` when the subject was written `../field`. */
+  refSpelling?: FieldRefSpelling;
 }
 
 export interface AnsweredRule {
@@ -48,6 +75,8 @@ export interface AnsweredRule {
   field: string;
   /** If true, expression is `${field} = ''` (the field is NOT answered). */
   negated: boolean;
+  /** `'relative'` when the subject was written `../field`. */
+  refSpelling?: FieldRefSpelling;
 }
 
 /**
@@ -68,6 +97,70 @@ export interface TruthyRule {
   field: string;
   /** True for `not(${field})`. */
   negated: boolean;
+  /** `'relative'` when the subject was written `../field`. */
+  refSpelling?: FieldRefSpelling;
+}
+
+/**
+ * T9a (#14) — a comparison whose subject is NOT a bare field reference:
+ * the answer itself (`. >= 0`), a function over it (`string-length(.) <=
+ * 100`, `int(format-date(., '%Y')) > 2000`), arithmetic (`int(format-date(
+ * today(), '%Y')) + 57 >= int(.)`), or any operand against any operand
+ * (`. > max(coalesce(${a}, 0), coalesce(${b}, 0))`). 774 of the 777 real
+ * `constraint` rules have a subject of this shape.
+ *
+ * `source` is the clause exactly as the author wrote it. The serializer
+ * re-emits it while it still parses to the same `lhs` / `op` / `rhs`, so
+ * `.<=100` opens as a rule and saves back as `.<=100`; only a rule the
+ * author changed is emitted in canonical spacing. Absent on rules the UI
+ * builds from scratch.
+ */
+export interface ExprComparisonRule {
+  kind: 'expr-comparison';
+  lhs: Operand;
+  op: Operator;
+  rhs: Operand;
+  source?: string;
+}
+
+/** Functions that are themselves a boolean test when called on an answer. */
+export type PredicateFn = 'regex' | 'selected' | 'contains' | 'starts-with' | 'ends-with';
+
+/**
+ * T9a — `regex(., '…')`, `selected(., 'none')`, `contains(., 'x')`, each
+ * optionally wrapped in `not(…)`. A `selected(${field}, …)` with a field
+ * subject stays a {@link SelectedRule}; this kind is for every other
+ * subject. `source` as on {@link ExprComparisonRule}.
+ */
+export interface PredicateRule {
+  kind: 'predicate';
+  fn: PredicateFn;
+  args: Operand[];
+  negated: boolean;
+  source?: string;
+}
+
+/**
+ * T9a — `not(A and B)`: a negated flat chain, the shape of the "[None] must
+ * be chosen alone" rule `not(selected(., 'none') and count-selected(.) > 1)`
+ * (50 real rules). The inner chain is flat and fully structured (no raw
+ * parts, no second level of parens); anything else stays raw.
+ */
+export interface NotGroupRule {
+  kind: 'not-group';
+  combinator: Combinator;
+  rules: Rule[];
+  source?: string;
+}
+
+/**
+ * T9a — `true`, `true()` or `1`: a placeholder constraint that always
+ * passes (51 real rows). The UI can label it; the text is carried verbatim
+ * and never rewritten to a different spelling.
+ */
+export interface AlwaysTrueRule {
+  kind: 'always-true';
+  text: string;
 }
 
 export interface RawRule {
@@ -177,6 +270,10 @@ export type Rule =
   | SelectedRule
   | AnsweredRule
   | TruthyRule
+  | ExprComparisonRule
+  | PredicateRule
+  | NotGroupRule
+  | AlwaysTrueRule
   | DateOffsetRule
   | AgeRule
   | ContactInputComparisonRule
@@ -279,6 +376,15 @@ export function parseRelevant(expr: string): ParsedExpression {
   // expression whose canonical form differs from the author's spelling
   // is preserved verbatim as raw rather than reformatted.
   if (!candidate.isRawFallback && serializeRelevant(candidate) !== trimmed) {
+    return { combinator: 'and', rules: [{ kind: 'raw', text: trimmed }], isRawFallback: true };
+  }
+  // T9a (#14): the same check on an all-raw chain. Splitting on the
+  // combinator trims each part and rejoins with single spaces, so a chain
+  // written `a and  b` (two spaces; six distinct real FCHV / LMP
+  // constraints) came back one byte different. The self-check is
+  // authoritative on every path: when the split parts cannot reproduce the
+  // text, keep the whole expression as ONE raw rule.
+  if (candidate.isRawFallback && serializeRelevant(candidate) !== trimmed) {
     return { combinator: 'and', rules: [{ kind: 'raw', text: trimmed }], isRawFallback: true };
   }
   return candidate;
@@ -407,6 +513,70 @@ function parseSinglePart(part: string): Rule {
     return { kind: 'comparison', field: cmp[1], op, value: valueRaw, valueIsString: false };
   }
 
+  // T9a (#14) — the same four field-subject rules written with a relative
+  // path, `../field`, which real forms use as an alias of `${field}`. A
+  // single segment only: `../inputs/contact/x` is the contact-input
+  // reference recognised further down, and any other multi-segment path
+  // stays raw. The spelling is carried on the rule and re-emitted as written.
+  const relNotSel =
+    /^not\(\s*selected\(\s*\.\.\/([A-Za-z_][\w-]*)\s*,\s*'([^']*)'\s*\)\s*\)$/i.exec(t);
+  if (relNotSel && relNotSel[1] && relNotSel[2] !== undefined) {
+    return {
+      kind: 'selected',
+      field: relNotSel[1],
+      value: relNotSel[2],
+      negated: true,
+      refSpelling: 'relative',
+    };
+  }
+  const relSel = /^selected\(\s*\.\.\/([A-Za-z_][\w-]*)\s*,\s*'([^']*)'\s*\)$/i.exec(t);
+  if (relSel && relSel[1] && relSel[2] !== undefined) {
+    return {
+      kind: 'selected',
+      field: relSel[1],
+      value: relSel[2],
+      negated: false,
+      refSpelling: 'relative',
+    };
+  }
+  const relTruthy = /^(not\()?\.\.\/([A-Za-z_][\w-]*)(\))?$/.exec(t);
+  if (relTruthy && relTruthy[2] && Boolean(relTruthy[1]) === Boolean(relTruthy[3])) {
+    return {
+      kind: 'truthy',
+      field: relTruthy[2],
+      negated: relTruthy[1] !== undefined,
+      refSpelling: 'relative',
+    };
+  }
+  const relAns = /^\.\.\/([A-Za-z_][\w-]*)\s*(=|!=)\s*''$/.exec(t);
+  if (relAns && relAns[1]) {
+    return { kind: 'answered', field: relAns[1], negated: relAns[2] === '=', refSpelling: 'relative' };
+  }
+  const relCmp = /^\.\.\/([A-Za-z_][\w-]*)\s*(>=|<=|!=|=|>|<)\s*(.+)$/.exec(t);
+  if (relCmp && relCmp[1] && relCmp[2] && relCmp[3] !== undefined) {
+    const op = relCmp[2] as Operator;
+    const valueRaw = relCmp[3].trim();
+    const m = /^'([^']*)'$/.exec(valueRaw);
+    if (m && m[1] !== undefined) {
+      return {
+        kind: 'comparison',
+        field: relCmp[1],
+        op,
+        value: m[1],
+        valueIsString: true,
+        refSpelling: 'relative',
+      };
+    }
+    return {
+      kind: 'comparison',
+      field: relCmp[1],
+      op,
+      value: valueRaw,
+      valueIsString: false,
+      refSpelling: 'relative',
+    };
+  }
+
   // Split at the first comparison operator that sits OUTSIDE any brackets or
   // quotes. A lazy regex found the first operator anywhere, so
   // `if(REF != '', REF, .) = 'true'` — what the relevant builder now emits for
@@ -479,26 +649,172 @@ function parseSinglePart(part: string): Rule {
     }
   }
 
+  // T9a (#14) — rules about the answer itself and anything else inside the
+  // operand grammar. Every kind below carries `source` (the clause verbatim)
+  // and the serializer re-emits it while it still parses to the same rule,
+  // so a tight-spaced `.<=100` opens AND saves back byte-identical. These
+  // sit after every field-subject regex so existing consumers keep getting
+  // exactly the rules they got before.
+
+  // `true`, `true()`, `1` — a placeholder that always passes. Never rewritten.
+  if (/^(true|true\(\)|1)$/.test(t)) return { kind: 'always-true', text: t };
+
+  // `not(<predicate>)` or `not(<flat chain>)`.
+  const notWrapped = parseNotWrapped(t);
+  if (notWrapped) return notWrapped;
+
+  // `regex(., '…')`, `selected(., 'none')`, `contains(., 'x')` …
+  const predicate = parsePredicate(t);
+  if (predicate) return { ...predicate, source: t };
+
+  // `<operand> OP <operand>`: `. >= 0`, `string-length(.) <= 100`,
+  // `int(format-date(today(), '%Y')) + 57 >= int(.)`, `. > max(coalesce(…))`.
+  if (opSplit) {
+    const lhs = parseOperand(opSplit.lhs);
+    const rhs = lhs ? parseOperand(opSplit.rhs) : null;
+    if (lhs && rhs) {
+      return { kind: 'expr-comparison', lhs, op: opSplit.op as Operator, rhs, source: t };
+    }
+  }
+
   return { kind: 'raw', text: t };
+}
+
+const PREDICATE_FNS: ReadonlySet<string> = new Set<PredicateFn>([
+  'regex',
+  'selected',
+  'contains',
+  'starts-with',
+  'ends-with',
+]);
+
+/** A single predicate call over the operand grammar, or null. No `source`. */
+function parsePredicate(t: string): Omit<PredicateRule, 'source'> | null {
+  const op = parseOperand(t);
+  if (!op || op.kind !== 'call' || !PREDICATE_FNS.has(op.fn)) return null;
+  return { kind: 'predicate', fn: op.fn as PredicateFn, args: op.args, negated: false };
+}
+
+/**
+ * `not( … )` where the paren opened after `not` closes at the very end.
+ * A negated predicate becomes a {@link PredicateRule}; a negated flat
+ * chain becomes a {@link NotGroupRule} only when every inner rule is
+ * structured (no raw parts, no second level of parens).
+ */
+function parseNotWrapped(t: string): Rule | null {
+  if (!/^not\(/i.test(t) || !t.endsWith(')')) return null;
+  // The `(` after `not` must enclose the whole remainder.
+  let depth = 0;
+  for (let i = 3; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "'" || ch === '"') {
+      const close = t.indexOf(ch, i + 1);
+      if (close < 0) return null;
+      i = close;
+      continue;
+    }
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0 && i !== t.length - 1) return null;
+    }
+  }
+  if (depth !== 0) return null;
+  const inner = t.slice(4, -1).trim();
+  if (!inner) return null;
+
+  const predicate = parsePredicate(inner);
+  if (predicate) return { ...predicate, negated: true, source: t };
+
+  const chain = parseRelevant(inner);
+  if (chain.isRawFallback || chain.rules.length === 0) return null;
+  if (chain.rules.some((r) => r.kind === 'raw')) return null;
+  return { kind: 'not-group', combinator: chain.combinator, rules: chain.rules, source: t };
+}
+
+/**
+ * The author's own text for a T9a rule while it still describes the rule;
+ * otherwise the canonical form. Re-checking rather than trusting `source`
+ * blindly matters: a consumer that spreads `{ ...rule, op: '<' }` keeps the
+ * stale text, and emitting it would write the OLD rule.
+ */
+function sourceOrCanonical(
+  rule: ExprComparisonRule | PredicateRule | NotGroupRule,
+  canonical: () => string,
+): string {
+  if (rule.source !== undefined) {
+    const reparsed = parseSinglePart(rule.source);
+    if (sameRule(reparsed, rule)) return rule.source;
+  }
+  return canonical();
+}
+
+function sameRule(a: Rule, b: Rule): boolean {
+  return JSON.stringify(stripSources(a)) === JSON.stringify(stripSources(b));
+}
+
+function stripSources(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stripSources);
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (k === 'source') continue;
+      out[k] = stripSources(val);
+    }
+    return out;
+  }
+  return v;
+}
+
+/** `${field}` or, when the author wrote it that way, `../field`. */
+function fieldRef(rule: { field: string; refSpelling?: FieldRefSpelling }): string {
+  return rule.refSpelling === 'relative' ? `../${rule.field}` : `\${${rule.field}}`;
+}
+
+/** Serialize a single rule. Exposed so UI consumers can show any kind as text. */
+export function serializeRule(rule: Rule): string {
+  return ruleToString(rule);
 }
 
 function ruleToString(rule: Rule): string {
   switch (rule.kind) {
     case 'comparison': {
       const v = rule.valueIsString ? `'${rule.value.replace(/'/g, "\\'")}'` : rule.value;
-      return `\${${rule.field}} ${rule.op} ${v}`;
+      return `${fieldRef(rule)} ${rule.op} ${v}`;
     }
     case 'selected': {
-      const inner = `selected(\${${rule.field}}, '${rule.value.replace(/'/g, "\\'")}')`;
+      const inner = `selected(${fieldRef(rule)}, '${rule.value.replace(/'/g, "\\'")}')`;
       return rule.negated ? `not(${inner})` : inner;
     }
     case 'answered': {
       // Answered = `${f} != ''`; not answered = `${f} = ''`.
-      return rule.negated ? `\${${rule.field}} = ''` : `\${${rule.field}} != ''`;
+      return rule.negated ? `${fieldRef(rule)} = ''` : `${fieldRef(rule)} != ''`;
     }
     case 'truthy': {
-      return rule.negated ? `not(\${${rule.field}})` : `\${${rule.field}}`;
+      return rule.negated ? `not(${fieldRef(rule)})` : fieldRef(rule);
     }
+    case 'expr-comparison':
+      return sourceOrCanonical(
+        rule,
+        () => `${serializeOperand(rule.lhs)} ${rule.op} ${serializeOperand(rule.rhs)}`,
+      );
+    case 'predicate':
+      return sourceOrCanonical(rule, () => {
+        const inner = `${rule.fn}(${rule.args.map(serializeOperand).join(', ')})`;
+        return rule.negated ? `not(${inner})` : inner;
+      });
+    case 'not-group':
+      return sourceOrCanonical(
+        rule,
+        () =>
+          `not(${serializeRelevant({
+            combinator: rule.combinator,
+            rules: rule.rules,
+            isRawFallback: false,
+          })})`,
+      );
+    case 'always-true':
+      return rule.text;
     case 'date_offset': {
       const op = rule.comparator === 'more_than' ? '>' : '<';
       const days = UNIT_DAYS[rule.unit];

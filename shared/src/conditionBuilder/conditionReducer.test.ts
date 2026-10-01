@@ -918,6 +918,74 @@ test("T9b case (b): `${field} = ''` reopens as \"is not selected\" and chains wi
   assert.equal(serializeBuilderState(extended), `${existing} and \${age} > 18`);
 });
 
+/* --------------- T9a (#14): `../field` opens as a clause and saves back as written --------------- */
+
+test('T9a: `selected(../lmp_approx, …)` hydrates as a selected clause and re-emits the ../ spelling', () => {
+  const existing = "selected(../lmp_approx, 'approx_weeks')";
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.equal(s.clauses.length, 1);
+  assert.equal(s.clauses[0]?.field, 'lmp_approx');
+  assert.equal(s.clauses[0]?.op, 'selected');
+  assert.equal(s.clauses[0]?.value, 'approx_weeks');
+  assert.equal(serializeBuilderState(s), existing);
+  // A clause the user adds is emitted canonically (${}); the hydrated one keeps ../.
+  const extended = commit(setDraft(s, { field: 'gravidity', op: '>', value: '3' }), 'and');
+  assert.equal(serializeBuilderState(extended), `${existing} and \${gravidity} > 3`);
+});
+
+test("T9a: `../lmp_date_8601 != ''` and `../f = 'x'` hydrate as clauses, chain, and stay byte-identical", () => {
+  const existing = "../lmp_date_8601 != '' and ../lmp_approx = 'approx_weeks'";
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.deepEqual(
+    s.clauses.map((c) => [c.field, c.op, c.value]),
+    [
+      ['lmp_date_8601', 'ref', ''],
+      ['lmp_approx', '=', 'approx_weeks'],
+    ],
+  );
+  assert.equal(s.lockedConnector, 'and');
+  assert.equal(serializeBuilderState(s), existing);
+});
+
+test('T9a: a ${} clause whose VALUE is ../other keeps the value text as written', () => {
+  const existing = '${a} = ../b';
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'constraint',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.deepEqual(
+    s.clauses.map((c) => [c.field, c.op, c.value]),
+    [['a', '=', '../b']],
+  );
+  // The strip's own canonical emission would quote `../b` as a string, so the
+  // hydrated clause keeps its spelling and writes back exactly these bytes.
+  assert.equal(serializeBuilderState(s), existing);
+});
+
+test('T9a: `.`-subject rules are structured in the parser but have no clause yet → raw fallback in the strip (9e owns them)', () => {
+  const existing = '. >= 0 and . <= 20';
+  assert.equal(parseRelevant(existing).isRawFallback, false);
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'constraint',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, existing);
+  assert.equal(s.clauses.length, 0);
+});
+
 test('T9b case (b): a stale `source` that no longer describes the clause is ignored, not emitted', () => {
   // Only reachable by a caller constructing state by hand — the reducer never
   // edits a committed clause — but the guard is what makes `source` safe.
