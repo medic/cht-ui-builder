@@ -77,25 +77,20 @@ test('T9a — `.` constraints and `../field` relevants survive open-and-save byt
     await page.getByRole('button', { name: 'pregnancy.xlsx' }).click();
     await expect(page.locator('.survey-row').first()).toBeVisible();
 
-    // (2) The modal shows the `.` constraint as rows, not as a raw warning.
+    // (2) The `.` constraint opens structured: since 9e the Validation panel
+    // shows `. >= 0 and . <= 20` as "Between 0 and 20", and `.<=100` (tight)
+    // as a single bound — neither as plain text.
     const gravidity = rowByType(page, /^integer$/);
     await gravidity.getByRole('button', { name: /show advanced/ }).click();
-    const constraintField = gravidity
-      .locator('label.expr-field')
-      .filter({ has: page.locator('code.raw-col-tag', { hasText: /^constraint$/ }) });
-    await expect(constraintField.locator('input').first()).toHaveValue('. >= 0 and . <= 20');
-    // The button sits inside the <label>, so its accessible name is the whole
-    // label text; match on its own text instead.
-    await constraintField.locator('button', { hasText: '✎ build' }).click();
-    const modal = page.locator('.rule-builder-modal');
-    await expect(modal).toBeVisible();
-    await expect(modal.locator('.badge.warn')).toHaveCount(0);
-    const answerRules = modal.getByLabel('Rule about this answer');
-    await expect(answerRules).toHaveCount(2);
-    await expect(answerRules.nth(0)).toHaveValue('. >= 0');
-    await expect(answerRules.nth(1)).toHaveValue('. <= 20');
-    await modal.getByRole('button', { name: 'cancel' }).first().click();
-    await expect(modal).not.toBeVisible();
+    const gravPanel = gravidity.getByTestId('validation-panel');
+    await expect(gravPanel.getByRole('spinbutton', { name: 'Minimum' })).toHaveValue('0');
+    await expect(gravPanel.getByRole('spinbutton', { name: 'Maximum' })).toHaveValue('20');
+    await expect(gravPanel.getByRole('textbox', { name: 'Expression' })).toHaveCount(0);
+    const chair = rowByType(page, /^select_one pass_fail$/);
+    await chair.getByRole('button', { name: /show advanced/ }).click();
+    const chairPanel = chair.getByTestId('validation-panel');
+    await expect(chairPanel.getByRole('combobox', { name: 'Comparison' })).toHaveValue('<=');
+    await expect(chairPanel.getByRole('textbox', { name: 'Value' })).toHaveValue('100');
 
     // (3) A `../field` relevant opens in the inline strip as a clause.
     const lmpNote = rowByType(page, /^note$/);

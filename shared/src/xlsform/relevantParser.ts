@@ -300,6 +300,17 @@ export interface ParsedExpression {
   rules: Rule[];
   /** Whether the whole expression had to be treated as raw because grammar didn't match. */
   isRawFallback: boolean;
+  /**
+   * T9e (#18) — the text BETWEEN consecutive rules exactly as written
+   * (` and `, ` and\n`, ` and  `), one entry per gap, when this expression
+   * was parsed from a cell whose joins are not the canonical ` and `.
+   * `serializeRelevant` re-emits them while the count still matches the
+   * rules (a consumer that adds or removes a rule gets canonical joins).
+   * Absent on canonical cells and on anything a consumer builds, so the
+   * five existing consumers see no change. Real configs break ~90 chains
+   * across a newline or a double space; without this they are raw.
+   */
+  separators?: string[];
 }
 
 /**
@@ -351,7 +362,7 @@ export function parseRelevant(expr: string): ParsedExpression {
   }
   const combinator: Combinator = containsOr ? 'or' : 'and';
 
-  const parts = splitOnCombinator(trimmed, combinator);
+  const { parts, separators } = splitWithSeparators(trimmed, combinator);
   const rules: Rule[] = [];
   let anyRaw = false;
   for (const p of parts) {
@@ -359,10 +370,14 @@ export function parseRelevant(expr: string): ParsedExpression {
     if (r.kind === 'raw') anyRaw = true;
     rules.push(r);
   }
+  const canonicalJoin = ` ${combinator} `;
   const candidate: ParsedExpression = {
     combinator,
     rules,
     isRawFallback: anyRaw && rules.every((r) => r.kind === 'raw'),
+    // Only carried when at least one join is spelled differently from the
+    // canonical one, so canonical cells keep the shape consumers always saw.
+    ...(separators.some((s) => s !== canonicalJoin) ? { separators } : {}),
   };
 
   // §3.1 self-check (plan: docs/plans/condition-builder.md). The serializer
@@ -394,12 +409,43 @@ export function parseRelevant(expr: string): ParsedExpression {
 export function serializeRelevant(parsed: ParsedExpression): string {
   if (parsed.rules.length === 0) return '';
   if (parsed.rules.length === 1) return ruleToString(parsed.rules[0]!);
-  return parsed.rules.map(ruleToString).join(` ${parsed.combinator} `);
+  const texts = parsed.rules.map(ruleToString);
+  const seps = parsed.separators;
+  // The author's joins, while they still fit the rules AND still spell this
+  // combinator (a consumer may flip `and` to `or` on the same rule list).
+  if (
+    seps &&
+    seps.length === texts.length - 1 &&
+    seps.every((s) => s.trim().toLowerCase() === parsed.combinator)
+  ) {
+    let out = texts[0]!;
+    for (let i = 1; i < texts.length; i++) out += seps[i - 1]! + texts[i]!;
+    return out;
+  }
+  return texts.join(` ${parsed.combinator} `);
 }
 
 /** Cheap, paren-aware split that respects function-call parens. */
 function splitOnCombinator(expr: string, combinator: Combinator): string[] {
-  const out: string[] = [];
+  return splitWithSeparators(expr, combinator).parts;
+}
+
+function isGap(ch: string | undefined): boolean {
+  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+}
+
+/**
+ * The same split, also returning the text between consecutive parts
+ * exactly as written (` and `, ` and\n`, ` and  `) — T9e (#18). A newline
+ * or a run of spaces around the combinator is a boundary too; real
+ * configs break ~90 chains that way and they were raw before.
+ */
+function splitWithSeparators(
+  expr: string,
+  combinator: Combinator,
+): { parts: string[]; separators: string[] } {
+  const parts: string[] = [];
+  const separators: string[] = [];
   let depth = 0;
   let i = 0;
   let last = 0;
@@ -414,11 +460,18 @@ function splitOnCombinator(expr: string, combinator: Combinator): string[] {
         const prevCh = expr[i - 1];
         const nextCh = expr[i + w.length];
         if (
-          (i === 0 || prevCh === ' ' || prevCh === '\t' || prevCh === ')') &&
-          (nextCh === ' ' || nextCh === '\t' || nextCh === '(' || nextCh === undefined)
+          (i === 0 || isGap(prevCh) || prevCh === ')') &&
+          (isGap(nextCh) || nextCh === '(' || nextCh === undefined)
         ) {
-          out.push(expr.slice(last, i).trim());
-          i += w.length;
+          const before = expr.slice(last, i);
+          parts.push(before.trim());
+          // The separator runs from the end of the trimmed previous part to
+          // the start of the trimmed next part: trailing gap + word + leading gap.
+          const trailing = before.length - before.trimEnd().length;
+          let j = i + w.length;
+          while (j < expr.length && isGap(expr[j])) j++;
+          separators.push(expr.slice(i - trailing, j));
+          i = j;
           last = i;
           continue;
         }
@@ -426,8 +479,16 @@ function splitOnCombinator(expr: string, combinator: Combinator): string[] {
     }
     i++;
   }
-  out.push(expr.slice(last).trim());
-  return out.filter(Boolean);
+  parts.push(expr.slice(last).trim());
+  // Drop empty parts (a leading/trailing combinator) together with their gap.
+  const keptParts: string[] = [];
+  const keptSeps: string[] = [];
+  for (let k = 0; k < parts.length; k++) {
+    if (!parts[k]) continue;
+    if (keptParts.length > 0) keptSeps.push(separators[k - 1] ?? ` ${combinator} `);
+    keptParts.push(parts[k]!);
+  }
+  return { parts: keptParts, separators: keptSeps };
 }
 
 function wordAt(s: string, i: number): string | null {

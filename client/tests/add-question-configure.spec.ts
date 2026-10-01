@@ -136,8 +136,12 @@ test.describe('configure step on (the default for a new author)', () => {
       await configure.getByRole('checkbox', { name: /^Required/ }).check();
       // The fixture is bilingual (en, ne): one hint and one message per language.
       await configure.getByPlaceholder(/Help text/).first().fill('Years');
-      await configure.getByPlaceholder(/\. >= 0 and \. <= 20/).fill('. >= 0 and . <= 20');
-      await configure.getByPlaceholder(/Message when the answer is rejected/).first().fill('Must be 0 to 20');
+      // The Validation slot is the 9e panel: a preset, and a message per language.
+      const panel = configure.getByTestId('validation-panel');
+      await panel.getByRole('combobox', { name: 'Add a validation rule' }).selectOption({ label: 'Between two values' });
+      await panel.getByRole('spinbutton', { name: 'Minimum' }).fill('0');
+      await panel.getByRole('spinbutton', { name: 'Maximum' }).fill('20');
+      await panel.getByPlaceholder('Message shown when the answer is rejected').fill('Must be 0 to 20');
       await configure.getByRole('button', { name: 'Add question', exact: true }).click();
       await expect(picker).not.toBeVisible();
 

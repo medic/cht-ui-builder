@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { slugifyHierarchyId, type ReportFieldChoice } from '@cht-ui/shared';
-import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
+import { ValidationPanel } from './ValidationPanel.js';
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
@@ -196,7 +196,6 @@ export function QuestionTypePicker(props: Props) {
   const [hints, setHints] = useState<Record<string, string>>({});
   const [constraint, setConstraint] = useState('');
   const [constraintMessages, setConstraintMessages] = useState<Record<string, string>>({});
-  const [showConstraintBuilder, setShowConstraintBuilder] = useState(false);
   const [sectionLabel, setSectionLabel] = useState('');
   const [sectionAppearance, setSectionAppearance] = useState<'default' | 'field-list'>('default');
   const [sectionKind, setSectionKind] = useState<'group' | 'repeat'>('group');
@@ -869,62 +868,33 @@ export function QuestionTypePicker(props: Props) {
               ))}
             </div>
 
-            <fieldset className="qtype-labels-field" aria-label="Validation">
-              <span className="qtype-labels-legend">
-                Validation{' '}
-                <span className="muted small">— accept the answer only if…</span>
-              </span>
-              <label className="qtype-locale-label">
-                <span className="locale-tag">constraint</span>
-                <input
-                  value={constraint}
-                  onChange={(e) => setConstraint(e.target.value)}
-                  placeholder="e.g. . >= 0 and . <= 20"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                {props.fieldOptions && (
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => setShowConstraintBuilder(true)}
-                  >
-                    ✎ build
-                  </button>
-                )}
-              </label>
-              {activeLocales.map((loc) => (
-                <label key={loc} className="qtype-locale-label">
-                  <span className="locale-tag">constraint_message::{loc}</span>
-                  <input
-                    value={constraintMessages[loc] ?? ''}
-                    onChange={(e) =>
-                      setConstraintMessages((prev) => ({ ...prev, [loc]: e.target.value }))
-                    }
-                    placeholder={
-                      activeLocales.length > 1
-                        ? `Message when the answer is rejected, in ${loc}`
-                        : 'Message when the answer is rejected'
-                    }
-                    autoComplete="off"
-                  />
-                </label>
-              ))}
-            </fieldset>
-
-            {showConstraintBuilder && props.fieldOptions && (
-              <RelevantRuleBuilder
-                column="constraint"
-                value={constraint}
-                fieldOptions={props.fieldOptions}
-                fieldChoiceOptions={props.fieldChoiceOptions}
-                onCancel={() => setShowConstraintBuilder(false)}
-                onSave={(v) => {
-                  setConstraint(v);
-                  setShowConstraintBuilder(false);
-                }}
-              />
-            )}
+            {/* T9e (#18) — the Validation panel: presets per question type,
+                 a message per language. The choices typed in the previous
+                 step feed "[choice] must be chosen alone". */}
+            <ValidationPanel
+              compact
+              questionType={
+                activeTile.needsListName
+                  ? `${activeTile.xlsformType} ${listChoice === 'new' ? newListName.trim() || 'options' : listChoice}`
+                  : activeTile.xlsformType
+              }
+              value={constraint}
+              onChange={setConstraint}
+              locales={activeLocales}
+              messages={constraintMessages}
+              onMessageChange={(loc, v) => setConstraintMessages((prev) => ({ ...prev, [loc]: v }))}
+              fieldOptions={props.fieldOptions ?? []}
+              choices={
+                listChoice === 'new'
+                  ? draftChoices
+                      .filter((c) => c.name.trim())
+                      .map((c) => ({
+                        name: c.name.trim(),
+                        label: (c.labels[activeLocales[0] ?? 'en'] ?? '').trim() || c.name.trim(),
+                      }))
+                  : []
+              }
+            />
 
             <div className="qtype-actions">
               <button

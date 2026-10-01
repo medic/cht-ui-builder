@@ -93,6 +93,7 @@ import { LineageBuilder } from './LineageBuilder.js';
 import { InlineChoicesEditor } from './InlineChoicesEditor.js';
 import { ChoiceNameInput } from './ChoiceNameInput.js';
 import { InsertLabelRefButton } from './InsertLabelRefButton.js';
+import { ValidationPanel } from './ValidationPanel.js';
 import { useHistory } from '../state/useHistory.js';
 import { showUndoToast } from './UndoToast.js';
 
@@ -2352,17 +2353,39 @@ function SurveyRowCard(props: {
               inputContactFields={props.inputContactFields}
               contextKeys={props.contextKeys}
             />
-            <ExpressionField
-              label="constraint"
-              friendlyLabel="Accept the answer only if…"
-              hint="validation rule"
-              helpText="XPath. If the answer doesn't satisfy this, the form blocks submission and shows the constraint_message below."
+            {/* T9e (#18) — the Validation panel replaces the constraint
+                 expression field, the strip's constraint column and the
+                 "✎ build" modal for this column. Messages live beside the
+                 rule; required and its message beside them. */}
+            <ValidationPanel
+              questionType={row.type}
               value={row.extras['constraint'] ?? ''}
               onChange={(v) => setExtra('constraint', v)}
+              locales={props.locales.filter((loc) => !props.hiddenLocales.has(loc))}
+              messages={Object.fromEntries(
+                props.locales.map((loc) => [loc, row.extras[`constraint_message::${loc}`] ?? '']),
+              )}
+              onMessageChange={(loc, v) => setExtra(`constraint_message::${loc}`, v)}
+              onBatch={(changes) =>
+                props.update((r) => {
+                  const nextExtras = { ...r.extras };
+                  for (const [k, v] of Object.entries(changes)) {
+                    if (v === '') delete nextExtras[k];
+                    else nextExtras[k] = v;
+                  }
+                  return { ...r, extras: nextExtras };
+                })
+              }
+              required={Boolean(row.required && row.required !== 'no' && row.required !== 'false')}
+              onRequiredChange={(next) =>
+                props.update((r) => ({ ...r, required: next ? 'yes' : '' }))
+              }
+              requiredMessages={Object.fromEntries(
+                props.locales.map((loc) => [loc, row.extras[`required_message::${loc}`] ?? '']),
+              )}
+              onRequiredMessageChange={(loc, v) => setExtra(`required_message::${loc}`, v)}
               fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
-              inputContactFields={props.inputContactFields}
-              contextKeys={props.contextKeys}
+              choices={props.fieldChoiceOptions[row.name] ?? []}
             />
             {isSelectRow(row) && (
               <ExpressionField
@@ -2422,20 +2445,7 @@ function SurveyRowCard(props: {
                     onChange={(v) => setExtra(`hint::${loc}`, v)}
                   />
                 ))}
-                {row.extras['constraint'] &&
-                  props.locales
-                    .filter((loc) => !props.hiddenLocales.has(loc))
-                    .map((loc) => (
-                    <ExpressionField
-                      key={`cmsg-${loc}`}
-                      label={`constraint_message::${loc}`}
-                      friendlyLabel={`Error message (${loc})`}
-                      hint="when the constraint above fails"
-                      helpText="Shown to the user when the constraint rejects their answer. Only meaningful when a constraint is set."
-                      value={row.extras[`constraint_message::${loc}`] ?? ''}
-                      onChange={(v) => setExtra(`constraint_message::${loc}`, v)}
-                    />
-                  ))}
+                {/* constraint_message inputs moved into the Validation panel (T9e). */}
               </div>
             </details>
             <details className="raw-extras">
@@ -2453,7 +2463,8 @@ function SurveyRowCard(props: {
                       'repeat_count',
                     ].includes(k) &&
                     !k.startsWith('hint::') &&
-                    !k.startsWith('constraint_message::'),
+                    !k.startsWith('constraint_message::') &&
+                    !k.startsWith('required_message::'),
                 )
                 .map(([k, v]) => (
                   <ExpressionField
@@ -2948,9 +2959,10 @@ const COND_OPS_NEED_VALUE: CondOp[] = ['=', '!=', '>', '<', '>=', '<=', 'selecte
 // not a boolean, and is edited via the dedicated CalculationBuilder
 // (mounted by ExpressionField when `supportsCalculation` holds). See
 // docs/plans/calculation-builder.md v0.2 §3.6 — "double-door" fix.
+// T9e (#18): `constraint` is no longer offered here — the Validation panel
+// owns that column (presets per question type, messages beside the rule).
 const COLUMN_OPTIONS = [
   { value: 'relevant', label: 'Show when… (relevant)' },
-  { value: 'constraint', label: 'Accept only if… (constraint)' },
   { value: 'choice_filter', label: 'Filter choices when… (choice_filter)' },
 ] as const;
 

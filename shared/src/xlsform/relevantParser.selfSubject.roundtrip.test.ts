@@ -159,23 +159,55 @@ test('../field: multi-segment paths and the contact-input reference are not the 
 
 /* ------------------------- self-check stays authoritative ------------------ */
 
-test('self-check: an all-raw chain with a double space is ONE raw rule, byte-identical', () => {
+test('self-check: an all-raw chain is byte-identical whatever its spacing, and a raw part never partially parses', () => {
   // Before T9a the split parts were rejoined with single spaces, one byte
-  // off from the cell. Six distinct real constraints have this shape.
-  const src = "int(format-date(.,'%Y')) >= 1987 and  frobnicate(.) and  . < today()";
+  // off from the cell. With separators (T9e) the double space is carried;
+  // either way the bytes come back exactly and the chain is a raw fallback.
+  const src = 'frobnicate(.) >= 1987 and  frobnicate(.) and  frobnicate(.) < today()';
   const p = parseRelevant(src);
   assert.equal(p.isRawFallback, true);
-  assert.equal(p.rules.length, 1);
-  assert.equal(p.rules[0]?.kind, 'raw');
+  assert.ok(p.rules.every((r) => r.kind === 'raw'));
   assert.equal(serializeRelevant(p), src);
+  // A mixed chain (one part parses) is structured with the raw part kept as raw text.
+  const mixed = parseRelevant('frobnicate(.) and  . < today()');
+  assert.equal(mixed.isRawFallback, false);
+  assert.deepEqual(mixed.rules.map((r) => r.kind), ['raw', 'expr-comparison']);
+  assert.equal(serializeRelevant(mixed), 'frobnicate(.) and  . < today()');
+  // A separator the serializer cannot honour (unbalanced `(`) falls to one raw rule.
+  const odd = 'frobnicate(.) and (( . < today()';
+  const q = parseRelevant(odd);
+  assert.equal(q.isRawFallback, true);
+  assert.equal(serializeRelevant(q), odd);
 });
 
-test('self-check: chain-level spacing variants stay raw and byte-identical even when every part is structured', () => {
-  for (const src of ["selected(., 'a') and  . != 1", '. <= 100 AND . >= 70', '. <= 100 and\n. >= 70']) {
+test('separators (T9e): a chain broken across a newline or a double space opens structured and saves back byte-identical', () => {
+  for (const src of [
+    "selected(., 'a') and  . != 1",
+    '. <= 100 AND . >= 70',
+    '. <= 100 and\n. >= 70',
+    '. <= today() - 30 and\r\n. >= today() - 294',
+    "int(format-date(.,'%Y')) >= 1987 and int(format-date(.,'%Y')) >=  int(int(${start_date_as_fchv} - 57)) and  . < today()",
+  ]) {
     const p = parseRelevant(src);
-    assert.equal(p.isRawFallback, true, src);
+    assert.equal(p.isRawFallback, false, src);
+    assert.ok(p.rules.every((r) => r.kind !== 'raw'), src);
+    assert.ok(p.separators && p.separators.length === p.rules.length - 1, src);
     assert.equal(serializeRelevant(p), src);
   }
+  // A canonical chain carries no separators: existing consumers see the old shape.
+  assert.equal(parseRelevant('. >= 0 and . <= 20').separators, undefined);
+  assert.equal(parseRelevant("${a} = 'x' and ${b} > 1").separators, undefined);
+});
+
+test('separators: a consumer that changes the rule count or the combinator gets canonical joins', () => {
+  const p = parseRelevant('. <= 100 and\n. >= 70');
+  // Append a rule: lengths no longer match → canonical ` and `.
+  const more = { ...p, rules: [...p.rules, parseRelevant('. != 5').rules[0]!] };
+  assert.equal(serializeRelevant(more), '. <= 100 and . >= 70 and . != 5');
+  // Flip the combinator on the same rules: the authored join spells `and` → canonical ` or `.
+  assert.equal(serializeRelevant({ ...p, combinator: 'or' }), '. <= 100 or . >= 70');
+  // Remove a rule down to one: no join at all.
+  assert.equal(serializeRelevant({ ...p, rules: [p.rules[1]!] }), '. >= 70');
 });
 
 test('source: a consumer that edits a parsed rule gets canonical spacing for THAT rule only', () => {
