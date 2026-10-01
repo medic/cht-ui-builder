@@ -39,6 +39,7 @@ import {
   type ParsedCalculation,
   type ParsedExpression,
 } from '@cht-ui/shared';
+import { SurveyFieldPicker } from './SurveyFieldPicker.js';
 import { useApp } from '../state/store.js';
 import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
 import {
@@ -764,20 +765,13 @@ function SingleValuePanel(props: {
       {activeKind === 'field-ref' && (
         <label className="row gap" style={{ alignItems: 'center' }}>
           <span className="muted">Field:</span>
-          <select
+          <SurveyFieldPicker
             value={extractFieldName(props.value)}
-            onChange={(e) =>
-              props.onChange(e.target.value ? emitFieldRef(e.target.value) : '')
-            }
-            aria-label="Field reference"
-          >
-            <option value="">— pick a field —</option>
-            {props.fieldOptions.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+            options={props.fieldOptions}
+            onChange={(name) => props.onChange(name ? emitFieldRef(name) : '')}
+            placeholder="— pick a field —"
+            ariaLabel="Field reference"
+          />
           <code className="muted">saved as <strong>{props.value || '${field}'}</strong></code>
         </label>
       )}
@@ -1172,20 +1166,13 @@ function TypedOutputInput(props: {
         />
       )}
       {kind === 'field-ref' && (
-        <select
+        <SurveyFieldPicker
           value={extractFieldName(props.value)}
-          onChange={(e) =>
-            props.onChange(e.target.value ? emitFieldRef(e.target.value) : '')
-          }
-          aria-label="Field reference"
-        >
-          <option value="">— pick a field —</option>
-          {props.fieldOptions.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+          options={props.fieldOptions}
+          onChange={(name) => props.onChange(name ? emitFieldRef(name) : '')}
+          placeholder="— pick a field —"
+          ariaLabel="Field reference"
+        />
       )}
     </fieldset>
   );

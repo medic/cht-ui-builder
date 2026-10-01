@@ -92,6 +92,7 @@ import { LineageBuilder } from './LineageBuilder.js';
 import { InlineChoicesEditor } from './InlineChoicesEditor.js';
 import { ChoiceNameInput } from './ChoiceNameInput.js';
 import { InsertLabelRefButton } from './InsertLabelRefButton.js';
+import { FieldMetaProvider, SurveyFieldPicker } from './SurveyFieldPicker.js';
 import { useHistory } from '../state/useHistory.js';
 import { showUndoToast } from './UndoToast.js';
 
@@ -1358,6 +1359,7 @@ function SurveyTab(props: {
   }
 
   return (
+    <FieldMetaProvider form={form}>
     <div className="survey-tab">
       {/* Wave 2 §4 — language chip bar. Shows the form's active locales as
           toggle chips (click one to show or hide its label::xx columns on
@@ -1558,6 +1560,7 @@ function SurveyTab(props: {
         </>
       )}
     </div>
+    </FieldMetaProvider>
   );
 }
 
@@ -2250,6 +2253,7 @@ function SurveyRowCard(props: {
             <UnifiedConditionBuilder
               fieldOptions={props.fieldOptions}
               fieldChoices={props.fieldChoices}
+              fieldChoiceOptions={props.fieldChoiceOptions}
               fieldKinds={props.fieldKinds}
               getColumn={(col) => row.extras[col] ?? ''}
               setColumn={(col, value) => setExtra(col, value)}
@@ -2932,12 +2936,19 @@ const OPERATOR_LABELS: Record<ClauseOp, string> = {
   today: 'today',
 };
 
-function clauseToProse(c: Clause): string {
-  if (c.op === '=' || c.op === '!=' || c.op === '>' || c.op === '<' || c.op === '>=' || c.op === '<=') {
+function clauseToProse(
+  c: Clause,
+  /** T9c (#16) — choice label for readback; the clause keeps the name. */
+  labelFor: (field: string, value: string) => string = (_f, v) => v,
+): string {
+  if (c.op === '=' || c.op === '!=') {
+    return `${c.field} ${COMPARISON_PROSE[c.op]} ${labelFor(c.field, c.value)}`;
+  }
+  if (c.op === '>' || c.op === '<' || c.op === '>=' || c.op === '<=') {
     return `${c.field} ${COMPARISON_PROSE[c.op]} ${c.value}`;
   }
-  if (c.op === 'selected') return `${c.field} includes ${c.value}`;
-  if (c.op === 'selected-not') return `${c.field} does not include ${c.value}`;
+  if (c.op === 'selected') return `${c.field} includes ${labelFor(c.field, c.value)}`;
+  if (c.op === 'selected-not') return `${c.field} does not include ${labelFor(c.field, c.value)}`;
   if (c.op === 'not') return `not(\${${c.field}})`;
   if (c.op === 'ref') return `\${${c.field}}`;
   return 'today()';
@@ -2972,6 +2983,8 @@ function clauseToProse(c: Clause): string {
 function UnifiedConditionBuilder(props: {
   fieldOptions: string[];
   fieldChoices: Record<string, string[]>;
+  /** T9c (#16) — same map with labels, for the value picker and readback. */
+  fieldChoiceOptions?: Record<string, ReportFieldChoice[]>;
   /** FieldKind per field name. Missing keys fall through to 'unknown'
    *  (always-pass) — see plan v0.3 §3 never-de-emphasize contract. */
   fieldKinds: Record<string, FieldKind>;
@@ -3068,44 +3081,24 @@ function UnifiedConditionBuilder(props: {
   const needsField = (COND_OPS_NEED_FIELD as string[]).includes(state.draft.op);
   const needsValue = (COND_OPS_NEED_VALUE as string[]).includes(state.draft.op);
 
-  // ---- v0.3 type-aware soft filter --------------------------------------
-  // Local UI state only — NEVER enters BuilderState or any serialization
-  // path (Lal/Developer A7). If a saved/rehydrated field would be atypical
-  // for the current op, default the toggle to ON so the saved selection is
-  // never visually stranded.
-  const [showAllFields, setShowAllFields] = useState(false);
+  // ---- v0.3 type-aware ordering ------------------------------------------
+  // Render data only — NEVER enters BuilderState or any serialization path
+  // (Lal/Developer A7). Since T9c (#16) the picker groups by section and
+  // uses op-typicality purely to order fields inside a section, so there is
+  // no "Show all fields" toggle to strand a saved selection behind.
   const kindOf = (n: string): FieldKind => props.fieldKinds[n] ?? 'unknown';
 
-  // Op-first partition for the field picker. Active whenever the op takes
-  // a field (so `today` doesn't activate filtering; the field select is
-  // disabled in that case anyway). Selected field is forced into the
-  // typical bucket so it always renders adjacent to the picker.
-  const fieldHasOpHint = needsField;
-  const splitFieldsByOp = fieldHasOpHint && !showAllFields;
-  const typicalFields: string[] = [];
-  const atypicalFields: string[] = [];
-  if (splitFieldsByOp) {
-    for (const name of props.fieldOptions) {
-      if (name === state.draft.field) {
-        typicalFields.push(name);
-      } else if (fieldsTypicalForOp(state.draft.op, kindOf(name))) {
-        typicalFields.push(name);
-      } else {
-        atypicalFields.push(name);
-      }
-    }
-  }
-  // Auto-relax: if the rehydrated/selected field is atypical for the
-  // current op, surface it by forcing the flat list on next render. We
-  // use a ref-like effect to flip the toggle exactly once per mismatch.
-  useEffect(() => {
-    if (!splitFieldsByOp) return;
-    if (!state.draft.field) return;
-    const k = kindOf(state.draft.field);
-    if (!fieldsTypicalForOp(state.draft.op, k)) setShowAllFields(true);
-    // intentionally narrow deps — only react to draft.field/op transitions
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.draft.field, state.draft.op]);
+  // T9c — choice LABELS in the value picker and the readback; the value
+  // written stays the choice name.
+  const choiceLabel = (field: string, value: string): string =>
+    props.fieldChoiceOptions?.[field]?.find((c) => c.name === value)?.label ?? value;
+  const prose = (c: Clause): string => clauseToProse(c, choiceLabel);
+
+  // T9c — value cell mode: a typed literal, or another question picked
+  // from the same field picker. A `${…}` draft value (e.g. after a
+  // rehydrate) always shows as a picked question.
+  const [valueModeField, setValueIsField] = useState(false);
+  const valueIsField = valueModeField || /^\$\{[^}]+\}$/.test(state.draft.value);
 
   // Field-first partition for the op picker. Grouping only — every op
   // always stays in the DOM (no escape-hatch toggle needed; A6/A7).
@@ -3134,8 +3127,8 @@ function UnifiedConditionBuilder(props: {
   const draftEmpty = isDraftEmpty(state.draft);
   const stacked = state.clauses.length >= 2 || (state.clauses.length >= 1 && !draftEmpty);
 
-  const proseChips = state.clauses.map(clauseToProse);
-  const draftProse = isDraftComplete(state.draft) ? clauseToProse(state.draft) : '…';
+  const proseChips = state.clauses.map(prose);
+  const draftProse = isDraftComplete(state.draft) ? prose(state.draft) : '…';
 
   // Group-mode derived state.
   const activeGroup: Subgroup | null =
@@ -3216,7 +3209,7 @@ function UnifiedConditionBuilder(props: {
                           {CONNECTOR_LABELS[sg.connector]}
                         </span>
                       )}
-                      <code className="cond-preview">{clauseToProse(c)}</code>
+                      <code className="cond-preview">{prose(c)}</code>
                       <button
                         type="button"
                         className="link"
@@ -3335,7 +3328,7 @@ function UnifiedConditionBuilder(props: {
                     {CONNECTOR_LABELS[state.connectors[i - 1] ?? 'and']}
                   </span>
                 )}
-                <code className="cond-preview">{clauseToProse(c)}</code>
+                <code className="cond-preview">{prose(c)}</code>
                 <button
                   type="button"
                   className="link"
@@ -3369,59 +3362,19 @@ function UnifiedConditionBuilder(props: {
           </option>
         ))}
       </select>
-      <select
-        className="ref-chip-select"
+      {/* T9c (#16): the shared searchable picker — label + name, grouped by
+          section, technical rows behind a toggle. The op-typicality from
+          plan v0.3 survives as ordering inside each section; nothing is
+          ever withheld because of the op. */}
+      <SurveyFieldPicker
         value={state.draft.field}
-        onChange={(e) => setDraft({ field: e.target.value, value: '' })}
+        options={props.fieldOptions}
+        onChange={(name) => setDraft({ field: name, value: '' })}
+        typicalFor={needsField ? (n) => fieldsTypicalForOp(state.draft.op, kindOf(n)) : undefined}
+        placeholder="— field —"
         title="Pick a field"
         disabled={state.rawFallback !== null || !needsField}
-      >
-        <option value="">— field —</option>
-        {splitFieldsByOp ? (
-          <>
-            <optgroup label="Typical for this check">
-              {typicalFields.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </optgroup>
-            {atypicalFields.length > 0 && (
-              <optgroup label="Other fields">
-                {atypicalFields.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </>
-        ) : (
-          props.fieldOptions.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))
-        )}
-      </select>
-      {/* "Show all fields" — persistent escape hatch (plan v0.3 §3). Only
-          rendered when the op-first filter is actually active; otherwise
-          it would be a confusing no-op. Local UI state, never persisted. */}
-      {fieldHasOpHint && (
-        <label
-          className="muted"
-          style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          title="Show every field, including those less common for this check"
-        >
-          <input
-            type="checkbox"
-            checked={showAllFields}
-            onChange={(e) => setShowAllFields(e.target.checked)}
-            disabled={state.rawFallback !== null}
-          />
-          Show all fields
-        </label>
-      )}
+      />
       <select
         className="ref-chip-select"
         value={state.draft.op}
@@ -3450,18 +3403,47 @@ function UnifiedConditionBuilder(props: {
           <option value="">— value —</option>
           {choices.map((c) => (
             <option key={c} value={c}>
-              {c}
+              {choiceLabel(state.draft.field, c) === c ? c : `${choiceLabel(state.draft.field, c)} (${c})`}
             </option>
           ))}
         </select>
+      ) : valueIsField ? (
+        // T9c — the value is another question: pick it, never type `${…}`.
+        <SurveyFieldPicker
+          value={/^\$\{([^}]+)\}$/.exec(state.draft.value)?.[1] ?? ''}
+          options={props.fieldOptions}
+          onChange={(name) => setDraft({ value: name ? `\${${name}}` : '' })}
+          placeholder="— another question —"
+          title="Compare against another question's answer"
+          disabled={state.rawFallback !== null || !needsValue}
+        />
       ) : (
         <input
           className="cond-value-input"
           value={state.draft.value}
           onChange={(e) => setDraft({ value: e.target.value })}
-          placeholder="value or ${other_field}"
+          placeholder="value"
           disabled={state.rawFallback !== null || !needsValue}
         />
+      )}
+      {needsValue && !(choices && choices.length > 0) && (
+        <button
+          type="button"
+          className="link small"
+          onClick={(e) => {
+            e.preventDefault();
+            setValueIsField((v) => !v);
+            setDraft({ value: '' });
+          }}
+          disabled={state.rawFallback !== null}
+          title={
+            valueIsField
+              ? 'Type a literal value instead'
+              : "Compare against another question's answer instead of a typed value"
+          }
+        >
+          {valueIsField ? 'type a value' : 'another question'}
+        </button>
       )}
 
       {/* Between-clause connector picker. Visible whenever a chain is in
