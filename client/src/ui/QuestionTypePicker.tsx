@@ -11,7 +11,8 @@
  * or stages a draft.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { slugifyHierarchyId } from '@cht-ui/shared';
+import { slugifyHierarchyId, type ReportFieldChoice } from '@cht-ui/shared';
+import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
@@ -61,6 +62,18 @@ export interface PickerCommit {
      * detour through Translate → Choices.
      */
     choices: Array<{ name: string; labels: Record<string, string> }>;
+  };
+  /**
+   * T9d (#17) — the configure step. Absent when the step was skipped
+   * (one-click tiles, structural tiles, edit-type reopens). The parent
+   * writes `required = yes`, `hint::<loc>`, `constraint` and
+   * `constraint_message::<loc>` for the non-empty values only.
+   */
+  details?: {
+    required: boolean;
+    hints: Record<string, string>;
+    constraint: string;
+    constraintMessages: Record<string, string>;
   };
 }
 
@@ -112,11 +125,26 @@ interface Props {
    * legacy single-language behavior with the built-in `en` input.
    */
   labelLocales?: string[];
+  /**
+   * T9d (#17) — fields the Validation slot's "✎ build" modal may reference:
+   * the uniquely-named, non-plumbing rows BEFORE the insert position, in
+   * sheet order (the same list the row card computes as `earlierFields`).
+   * Absent → the slot is a plain expression box.
+   */
+  fieldOptions?: string[];
+  fieldChoiceOptions?: Record<string, ReportFieldChoice[]>;
+  /**
+   * T9d — when true, a question tile commits on the click, as before the
+   * configure step existed. The step's "always skip this step" box flips
+   * it through `onOneClickTilesChange`; the parent persists it.
+   */
+  oneClickTiles?: boolean;
+  onOneClickTilesChange?: (next: boolean) => void;
   onCancel: () => void;
   onCommit: (commit: PickerCommit) => void;
 }
 
-type PickerStep = 'pick-type' | 'configure-list';
+type PickerStep = 'pick-type' | 'configure-list' | 'configure';
 
 export function QuestionTypePicker(props: Props) {
   const mode = props.mode ?? 'full';
@@ -160,6 +188,15 @@ export function QuestionTypePicker(props: Props) {
   // `sectionKind` (audit item 15 resolution) lets the same entry point
   // author a Repeat — "+ Section" used to bypass the tile grid entirely,
   // making `begin_repeat` unreachable from it.
+  // T9d (#17) — the configure step's state: required, a hint per active
+  // locale, and the Validation slot (constraint + a message per locale).
+  // In this slice the slot is the existing "✎ build" modal over a plain
+  // expression box; 9e replaces it with presets.
+  const [required, setRequired] = useState(false);
+  const [hints, setHints] = useState<Record<string, string>>({});
+  const [constraint, setConstraint] = useState('');
+  const [constraintMessages, setConstraintMessages] = useState<Record<string, string>>({});
+  const [showConstraintBuilder, setShowConstraintBuilder] = useState(false);
   const [sectionLabel, setSectionLabel] = useState('');
   const [sectionAppearance, setSectionAppearance] = useState<'default' | 'field-list'>('default');
   const [sectionKind, setSectionKind] = useState<'group' | 'repeat'>('group');
@@ -222,6 +259,24 @@ export function QuestionTypePicker(props: Props) {
     ? QUESTION_TYPE_TILES.find((t) => t.id === activeTileId)
     : undefined;
 
+  /**
+   * T9d (#17) — tiles that never get the configure step: structure (a
+   * group has no answer to require or validate), the lineage sentinel,
+   * hidden rows, and any re-type of an existing row (labels, required and
+   * rules already live on that row).
+   */
+  function skipsConfigure(tile: QuestionTypeTile): boolean {
+    if (props.hideNameField) return true;
+    if (props.oneClickTiles) return true;
+    const t = tile.xlsformType.trim().toLowerCase();
+    return (
+      tile.id === 'lineage_block' ||
+      tile.id === 'hidden' ||
+      t === 'begin group' ||
+      t === 'begin repeat'
+    );
+  }
+
   function handlePick(tile: QuestionTypeTile) {
     setActiveTileId(tile.id);
     if (tile.needsListName) {
@@ -230,13 +285,34 @@ export function QuestionTypePicker(props: Props) {
       setStep('configure-list');
       return;
     }
-    // Kobo parity: single-click commits a tile that needs no further setup.
-    // Defer to the next tick so React flushes the activeTileId state first
-    // (so the closure in commit() sees the just-clicked tile).
-    requestAnimationFrame(() => commitFor(tile));
+    if (skipsConfigure(tile)) {
+      // Kobo parity: single-click commits a tile that needs no further setup.
+      // Defer to the next tick so React flushes the activeTileId state first
+      // (so the closure in commit() sees the just-clicked tile).
+      requestAnimationFrame(() => commitFor(tile));
+      return;
+    }
+    setStep('configure');
   }
 
-  function commitFor(tile: QuestionTypeTile) {
+  /** The configure step's values, or undefined when the step was skipped. */
+  function detailsFor(tile: QuestionTypeTile): PickerCommit['details'] {
+    if (skipsConfigure(tile)) return undefined;
+    const trimmedHints: Record<string, string> = {};
+    const trimmedMessages: Record<string, string> = {};
+    for (const loc of activeLocales) {
+      trimmedHints[loc] = (hints[loc] ?? '').trim();
+      trimmedMessages[loc] = (constraintMessages[loc] ?? '').trim();
+    }
+    return {
+      required,
+      hints: trimmedHints,
+      constraint: constraint.trim(),
+      constraintMessages: trimmedMessages,
+    };
+  }
+
+  function commitFor(tile: QuestionTypeTile, skipDetails = false) {
     let typeCell = tile.xlsformType;
     let list: PickerCommit['list'] | undefined;
     if (tile.needsListName) {
@@ -276,11 +352,18 @@ export function QuestionTypePicker(props: Props) {
       tileId: tile.id,
       list,
       labels,
+      details: skipDetails ? undefined : detailsFor(tile),
     });
   }
 
   function commit() {
     if (!activeTile) return;
+    // T9d — a select's choices step leads into the configure step, like a
+    // tile click does; the configure step itself commits.
+    if (step === 'configure-list' && !skipsConfigure(activeTile)) {
+      setStep('configure');
+      return;
+    }
     commitFor(activeTile);
   }
 
@@ -723,9 +806,155 @@ export function QuestionTypePicker(props: Props) {
               <button className="link" onClick={() => setStep('pick-type')}>
                 ← Back
               </button>
-              <button onClick={commit}>{props.commitLabel ?? 'Add question'}</button>
+              <button onClick={commit}>
+                {skipsConfigure(activeTile) ? (props.commitLabel ?? 'Add question') : 'Next: details'}
+              </button>
             </div>
           </>
+        )}
+
+        {/* T9d (#17) — the configure step between the type tile and the
+             commit: required, a hint per visible language, and the
+             Validation slot. Enter anywhere commits; "add without details"
+             is the one-click behaviour for this question; "always skip"
+             remembers that choice. */}
+        {!props.sectionMode && step === 'configure' && activeTile && (
+          <div
+            className="qtype-configure"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.target as { tagName?: string }).tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                commitFor(activeTile);
+              }
+            }}
+          >
+            <p className="muted">
+              <span className="qtype-tile-icon">{activeTile.icon}</span>{' '}
+              <strong>{activeTile.label}</strong>
+              {name ? (
+                <>
+                  {' '}
+                  — <code>{name}</code>
+                </>
+              ) : null}
+              . Set the details now, or add it as is.
+            </p>
+
+            <label className="qtype-name-field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={required}
+                onChange={(e) => setRequired(e.target.checked)}
+                autoFocus
+              />
+              Required — the form cannot be submitted without an answer
+            </label>
+
+            <div className="qtype-labels-field">
+              <span className="qtype-labels-legend">Hint{activeLocales.length > 1 ? 's' : ''}</span>
+              {activeLocales.map((loc) => (
+                <label key={loc} className="qtype-locale-label">
+                  <span className="locale-tag">hint::{loc}</span>
+                  <input
+                    value={hints[loc] ?? ''}
+                    onChange={(e) => setHints((prev) => ({ ...prev, [loc]: e.target.value }))}
+                    placeholder={
+                      activeLocales.length > 1
+                        ? `Help text shown under the question, in ${loc}`
+                        : 'Help text shown under the question (optional)'
+                    }
+                    autoComplete="off"
+                  />
+                </label>
+              ))}
+            </div>
+
+            <fieldset className="qtype-labels-field" aria-label="Validation">
+              <span className="qtype-labels-legend">
+                Validation{' '}
+                <span className="muted small">— accept the answer only if…</span>
+              </span>
+              <label className="qtype-locale-label">
+                <span className="locale-tag">constraint</span>
+                <input
+                  value={constraint}
+                  onChange={(e) => setConstraint(e.target.value)}
+                  placeholder="e.g. . >= 0 and . <= 20"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {props.fieldOptions && (
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={() => setShowConstraintBuilder(true)}
+                  >
+                    ✎ build
+                  </button>
+                )}
+              </label>
+              {activeLocales.map((loc) => (
+                <label key={loc} className="qtype-locale-label">
+                  <span className="locale-tag">constraint_message::{loc}</span>
+                  <input
+                    value={constraintMessages[loc] ?? ''}
+                    onChange={(e) =>
+                      setConstraintMessages((prev) => ({ ...prev, [loc]: e.target.value }))
+                    }
+                    placeholder={
+                      activeLocales.length > 1
+                        ? `Message when the answer is rejected, in ${loc}`
+                        : 'Message when the answer is rejected'
+                    }
+                    autoComplete="off"
+                  />
+                </label>
+              ))}
+            </fieldset>
+
+            {showConstraintBuilder && props.fieldOptions && (
+              <RelevantRuleBuilder
+                column="constraint"
+                value={constraint}
+                fieldOptions={props.fieldOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                onCancel={() => setShowConstraintBuilder(false)}
+                onSave={(v) => {
+                  setConstraint(v);
+                  setShowConstraintBuilder(false);
+                }}
+              />
+            )}
+
+            <div className="qtype-actions">
+              <button
+                className="link"
+                onClick={() => setStep(activeTile.needsListName ? 'configure-list' : 'pick-type')}
+              >
+                ← Back
+              </button>
+              {props.onOneClickTilesChange && (
+                <label className="muted small" style={{ marginRight: 'auto' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(props.oneClickTiles)}
+                    onChange={(e) => props.onOneClickTilesChange?.(e.target.checked)}
+                  />{' '}
+                  Always skip this step
+                </label>
+              )}
+              <button
+                className="link"
+                onClick={() => commitFor(activeTile, true)}
+                title="Add the question with no details (one click, as before)"
+              >
+                add without details
+              </button>
+              <button onClick={() => commitFor(activeTile)}>
+                {props.commitLabel ?? 'Add question'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>
