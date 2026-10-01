@@ -39,6 +39,27 @@ T9 was filed in June as one L ticket with four builders. Since then three plans 
 
 Also found, and not in the June ticket: two reopen defects in the clause codec (`conditionReducer.ts:507`), and the add-question step sets no validation and appends the new row off-screen.
 
+## Progress log
+
+| Date | Slice | State | Measured |
+| --- | --- | --- | --- |
+| 2026-10-01 | 9b (#15) | PR [#23](https://github.com/medic/cht-ui-builder/pull/23), branch `9b_reopen_truthy_answered` | `${f}` / `not(${f})` get a parser kind (`truthy`); `${f} != ''` opens via `Clause.source`. 21 real `relevant` cells open as clauses that were raw before. |
+| 2026-10-01 | 9a (#14) | PR [#24](https://github.com/medic/cht-ui-builder/pull/24), branch `9a_parser_dot_subject`, stacked on #23 | See the count below. |
+
+**777-rule count after 9a** (seven analysis configs, `constraint` column, "opens" = `parseRelevantGrouped` returns no raw part):
+
+| Column | Cells | Open fully structured | Before 9a |
+| --- | ---: | ---: | ---: |
+| `constraint` | 777 | **682** (51 are `true` / `true()` / `1` placeholders, so 631 of the 726 real rules; target after 9e was about 705) | 3 |
+| `relevant` | 3050 | 1839 | 1674 |
+| `choice_filter` | 92 | 2 (8 more partially) | 2 |
+
+Drift (`serializeAnyParsed(parseRelevantGrouped(x)) === x`) is 0 of 3919 cells; before 9a it was 37, all all-raw chains with a double space around `and` that the split-and-rejoin path reformatted (fixed in 9a by running the self-check on raw chains too).
+
+**`../` vs `${}` share** (same three columns, same configs): 410 relative references against 4433 `${}` references (8.5%); 329 of 3919 cells carry at least one `../field`, 9 cells mix both spellings, and none of them is a `../inputs/…` contact-input path. Per config, `../` is concentrated in lumbini and nssd relevants.
+
+**Still raw after 9a** (23 distinct constraint texts, 94 cells): a newline before `and` (8 texts, incl. the 27-cell nssd ethnicity rule), a double space in the chain (6), curly quotes `’none’` (1), `and` / `or` mixed inside `not(…)` (3), and a few `if(…)` / three-level groupings. All stay byte-identical. The chain-level spacing ones are a candidate for a chain `source` in 9e if the preset recogniser needs them.
+
 ## Invariants every slice inherits
 
 These are not per-slice choices. A sub-issue that violates one is not done, whatever its own acceptance says.
