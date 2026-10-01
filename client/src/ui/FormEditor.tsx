@@ -45,6 +45,7 @@ import {
   planSurveyMove,
   planUngroup,
   defaultInsertIndex,
+  insertIndexAfterRow,
   extractListName,
   renameListInType,
   renameChoiceValue,
@@ -556,6 +557,56 @@ function SurveyTab(props: {
   const setError = useApp((s) => s.setError);
   const [mode, setMode] = useState<'simple' | 'full'>('simple');
 
+  // T9d (#17) — the row the author is on (last focused card) decides where
+  // "+ Question" inserts; `flashRowId` scrolls to and highlights a row the
+  // picker just added. One-click tiles are a remembered preference.
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  const [flashRowId, setFlashRowId] = useState<string | null>(null);
+  const [oneClickTiles, setOneClickTilesState] = useState<boolean>(() => {
+    try {
+      // eslint-disable-next-line no-undef
+      return window.localStorage.getItem(ONE_CLICK_TILES_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  function setOneClickTiles(next: boolean): void {
+    setOneClickTilesState(next);
+    try {
+      // eslint-disable-next-line no-undef
+      window.localStorage.setItem(ONE_CLICK_TILES_KEY, next ? 'true' : 'false');
+    } catch {
+      /* storage unavailable — the choice lasts for this session only */
+    }
+  }
+  useEffect(() => {
+    if (!flashRowId) return;
+    // eslint-disable-next-line no-undef
+    const raf = window.requestAnimationFrame(() => {
+      // eslint-disable-next-line no-undef
+      const el = document.querySelector(
+        // eslint-disable-next-line no-undef
+        `[data-row-id="${window.CSS.escape(flashRowId)}"]`,
+        // eslint-disable-next-line no-undef
+      ) as HTMLElement | null;
+      if (!el) {
+        // Hidden in Simple mode (e.g. added inside `inputs/`): show Full and
+        // let the re-run find it.
+        if (mode !== 'full') setMode('full');
+        else setFlashRowId(null);
+        return;
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('row-flash');
+      el.focus({ preventScroll: true });
+      // eslint-disable-next-line no-undef
+      window.setTimeout(() => el.classList.remove('row-flash'), 2500);
+      setFlashRowId(null);
+    });
+    // eslint-disable-next-line no-undef
+    return () => window.cancelAnimationFrame(raf);
+  }, [flashRowId, mode]);
+
   // §H3 follow-up — click-to-jump effect. Runs when the header popover sets
   // `revealRowId`. Two-phase by design: if we're in Simple, structural rows
   // are hidden, so the first run flips mode to 'full' and returns; React
@@ -979,16 +1030,32 @@ function SurveyTab(props: {
         extras: {},
       };
       patch({ ...form, survey: spliceSurvey([beginRow, endRow]) });
+      setFlashRowId(beginRow.rowId);
+      setActiveRowId(beginRow.rowId);
       return;
     }
 
+    // T9d (#17) — the configure step's details, written only when set so
+    // an untouched step adds exactly the row the one-click flow added.
+    const detailExtras: Record<string, string> = {};
+    if (commit.details) {
+      for (const [loc, hint] of Object.entries(commit.details.hints)) {
+        if (hint) detailExtras[`hint::${loc}`] = hint;
+      }
+      if (commit.details.constraint) {
+        detailExtras['constraint'] = commit.details.constraint;
+        for (const [loc, msg] of Object.entries(commit.details.constraintMessages)) {
+          if (msg) detailExtras[`constraint_message::${loc}`] = msg;
+        }
+      }
+    }
     const newRow: SurveyRow = {
       rowId: `r_new_${stamp}_${counter}`,
       type: commit.type,
       name: commit.name || `q${counter}`,
       labels: seedLabels(),
-      required: '',
-      extras: { ...commit.extras },
+      required: commit.details?.required ? 'yes' : '',
+      extras: { ...commit.extras, ...detailExtras },
     };
     let nextChoices = form.choices;
     if (commit.list && commit.list.choices.length > 0) {
@@ -1018,6 +1085,9 @@ function SurveyTab(props: {
       nextChoices = [...form.choices, ...additions];
     }
     patch({ ...form, survey: spliceSurvey([newRow]), choices: nextChoices });
+    // T9d — the author must see where the question landed.
+    setFlashRowId(newRow.rowId);
+    setActiveRowId(newRow.rowId);
   }
 
   /**
@@ -1245,32 +1315,9 @@ function SurveyTab(props: {
       // splice a `${name}` that pyxform refuses to resolve, failing the whole
       // project. The harvest calculate is the sanctioned way to reach an input
       // and it sits outside the block, so it is still offered.
-      const plumbingIds = inputsBlockRowIds(form.survey);
-      // Only names that will actually RESOLVE. Withholding the inputs block is
-      // not sufficient on its own: the scaffold's top-level `patient_id`
-      // calculate shares its name with `inputs/contact/patient_id`, so
-      // `${patient_id}` is ambiguous however few times the picker lists it.
-      // The author who wants that value uses the contact-field insert, which
-      // creates a uniquely-named harvest row.
-      const nameCount = new Map<string, number>();
-      for (const r of form.survey) {
-        if (isStructural(r) || !r.name) continue;
-        nameCount.set(r.name, (nameCount.get(r.name) ?? 0) + 1);
-      }
-      const earlierFields = [
-        ...new Set(
-          form.survey
-            .slice(0, idx)
-            .filter(
-              (r) =>
-                !isStructural(r) &&
-                r.name &&
-                !plumbingIds.has(r.rowId) &&
-                nameCount.get(r.name) === 1,
-            )
-            .map((r) => r.name),
-        ),
-      ];
+      // Only names that will actually RESOLVE — see `pickableFieldsBefore`
+      // (shared with the add-question picker's Validation slot, T9d).
+      const earlierFields = pickableFieldsBefore(form.survey, idx);
       return (
         <SurveyRowCard
           key={row.rowId}
@@ -1358,7 +1405,15 @@ function SurveyTab(props: {
   }
 
   return (
-    <div className="survey-tab">
+    <div
+      className="survey-tab"
+      onFocusCapture={(e) => {
+        // T9d — remember the row the author is working in.
+        const card = (e.target as HTMLElement | null)?.closest?.('[data-row-id]');
+        const id = card?.getAttribute('data-row-id');
+        if (id) setActiveRowId(id);
+      }}
+    >
       {/* Wave 2 §4 — language chip bar. Shows the form's active locales as
           toggle chips (click one to show or hide its label::xx columns on
           every row card — a view filter, never a change to the form) plus a
@@ -1378,7 +1433,16 @@ function SurveyTab(props: {
       />
 
       <div className="row gap toolbar">
-        <button onClick={() => addQuestion(defaultInsertIndex(form.survey))}>+ Question</button>
+        <button
+          onClick={() => addQuestion(insertIndexAfterRow(form.survey, activeRowId))}
+          title={
+            activeRowId
+              ? 'Add a question right after the row you are on'
+              : 'Add a question at the end of the form (before any trailing plumbing)'
+          }
+        >
+          + Question
+        </button>
         {/* Wave 2 §3b — a first-class "+ Add section" toolbar entry beside
              "+ Question". Section-heavy forms (geriatric assessment, ANC)
              were unbuildable end-to-end when the Group tile was hidden in
@@ -1507,6 +1571,16 @@ function SurveyTab(props: {
             setPendingInsertIndex(null);
             setPickerSectionMode(false);
           }}
+          // T9d (#17) — the configure step's Validation slot builds against
+          // the fields BEFORE the insert position, and one-click tiles are
+          // a remembered preference.
+          fieldOptions={pickableFieldsBefore(
+            form.survey,
+            pendingInsertIndex ?? defaultInsertIndex(form.survey),
+          )}
+          fieldChoiceOptions={fieldChoiceOptions}
+          oneClickTiles={oneClickTiles}
+          onOneClickTilesChange={setOneClickTiles}
           onCommit={handlePickerCommit}
         />
       )}
@@ -2931,6 +3005,45 @@ const OPERATOR_LABELS: Record<ClauseOp, string> = {
   ref: 'has an answer',
   today: 'today',
 };
+
+/** localStorage key for the "always skip the configure step" preference (T9d). */
+const ONE_CLICK_TILES_KEY = 'cht-ui-builder.oneClickTiles';
+
+/**
+ * Field names a rule on the row at `idx` may reference: every named,
+ * non-structural row BEFORE `idx` that is outside the `inputs/` block and
+ * whose name is unique in the survey, in sheet order.
+ *
+ * Both matter for the same reason: `${x}` resolves by NAME across the
+ * whole survey, and the inputs block deliberately reuses names from
+ * outside it — the scaffold has `inputs/user/name` and
+ * `inputs/contact/name`, plus `inputs/contact/patient_id` next to a
+ * top-level calculate called `patient_id`. Offering those let one click
+ * splice a `${name}` that pyxform refuses to resolve, failing the whole
+ * project. The harvest calculate is the sanctioned way to reach an input
+ * and it sits outside the block, so it is still offered. The author who
+ * wants an ambiguous value uses the contact-field insert, which creates a
+ * uniquely-named harvest row.
+ */
+function pickableFieldsBefore(survey: SurveyRow[], idx: number): string[] {
+  const plumbingIds = inputsBlockRowIds(survey);
+  const nameCount = new Map<string, number>();
+  for (const r of survey) {
+    if (isStructural(r) || !r.name) continue;
+    nameCount.set(r.name, (nameCount.get(r.name) ?? 0) + 1);
+  }
+  return [
+    ...new Set(
+      survey
+        .slice(0, idx)
+        .filter(
+          (r) =>
+            !isStructural(r) && r.name && !plumbingIds.has(r.rowId) && nameCount.get(r.name) === 1,
+        )
+        .map((r) => r.name),
+    ),
+  ];
+}
 
 function clauseToProse(c: Clause): string {
   if (c.op === '=' || c.op === '!=' || c.op === '>' || c.op === '<' || c.op === '>=' || c.op === '<=') {

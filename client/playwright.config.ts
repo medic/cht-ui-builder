@@ -67,7 +67,15 @@ export default defineConfig({
       origins: [
         {
           origin: 'http://localhost:5173',
-          localStorage: [{ name: 'cht-ui-builder.hiddenTabs', value: '[]' }],
+          localStorage: [
+            { name: 'cht-ui-builder.hiddenTabs', value: '[]' },
+            // T9d (#17) — the add-question picker now has a configure step
+            // after a question tile. The build specs were written against
+            // one-click tiles, so the suite runs as an author who ticked
+            // "always skip this step". `add-question-configure.spec.ts`
+            // clears the key to drive the step itself.
+            { name: 'cht-ui-builder.oneClickTiles', value: 'true' },
+          ],
         },
       ],
     },
