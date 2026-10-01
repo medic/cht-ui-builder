@@ -149,9 +149,11 @@ test('demo 1 — author a survey: edit, choices, add, move, group + nest, transl
       'lmp_date',
       'lmp_note',
       'danger_signs',
+      // T9d (#17): "+ Question" inserts after the row the author is on —
+      // the danger_signs card they just edited — not at the end of the sheet.
+      'temperature',
       'chair_rise',
       'gravida',
-      'temperature',
     ]);
     // `.first()` = the ROW header's move button (the open choices panel adds
     // per-option move buttons that would otherwise make this ambiguous).
@@ -161,18 +163,20 @@ test('demo 1 — author a survey: edit, choices, add, move, group + nest, transl
       'lmp_date',
       'danger_signs',
       'lmp_note',
+      'temperature',
       'chair_rise',
       'gravida',
-      'temperature',
     ]);
     await danger().getByRole('button', { name: 'move down' }).first().click();
     expect(await visibleRowNames(page)).toEqual([
       'lmp_date',
       'lmp_note',
       'danger_signs',
+      // T9d (#17): "+ Question" inserts after the row the author is on —
+      // the danger_signs card they just edited — not at the end of the sheet.
+      'temperature',
       'chair_rise',
       'gravida',
-      'temperature',
     ]);
   });
 
