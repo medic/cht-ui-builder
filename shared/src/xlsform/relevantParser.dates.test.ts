@@ -39,9 +39,14 @@ test('age combined with comparison via AND', () => {
   assert.equal(rt(src), src);
 });
 
-test('unknown multiplier falls back to raw', () => {
-  // 42 isn't a known unit multiplier, must stay raw rather than misinterpret.
+test('unknown multiplier is not a date_offset, and round-trips byte-identical', () => {
+  // 42 isn't a known unit multiplier, so this must not be misread as a
+  // date_offset. Before T9a (#14) it stayed raw; now it parses as a plain
+  // operand comparison (`today() - ${field}` > `5 * 42`) carrying the
+  // author's text, which the serializer re-emits as written.
   const src = 'today() - ${field} > 5*42';
   const p = parseRelevant(src);
-  assert.equal(p.rules[0]!.kind, 'raw');
+  assert.notEqual(p.rules[0]!.kind, 'date_offset');
+  assert.equal(p.rules[0]!.kind, 'expr-comparison');
+  assert.equal(serializeRelevant(p), src);
 });
