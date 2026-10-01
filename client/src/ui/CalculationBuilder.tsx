@@ -1342,6 +1342,9 @@ function conditionProse(cond: ParsedExpression): string {
     if (r.kind === 'answered') {
       return `\${${r.field}} ${r.negated ? 'is empty' : 'is answered'}`;
     }
+    if (r.kind === 'truthy') {
+      return `\${${r.field}} ${r.negated ? 'is not selected' : 'has an answer'}`;
+    }
     if (r.kind === 'age') {
       return `age of \${${r.field}} ${r.op} ${r.value} years`;
     }

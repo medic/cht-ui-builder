@@ -31,8 +31,10 @@
  *     legacy fragment-append path was removed in commit B (§3.7).
  */
 import {
+  parseRelevant,
   parseRelevantGrouped,
   serializeAnyParsed,
+  serializeRelevant,
   type AnyParsed,
   type GroupedExpression,
   type ParsedExpression,
@@ -62,6 +64,17 @@ export interface Clause {
   op: ClauseOp;
   /** Empty for ops in {'ref','today','not','selected'-without-value}. */
   value: string;
+  /**
+   * The clause EXACTLY as the author wrote it, when this clause was
+   * hydrated from a cell whose spelling differs from what `clauseToRule`
+   * would emit for the same projection. Today that is `${f} != ''` /
+   * `${f} = ''` (parser kind `answered`), which the strip shows as
+   * "has an answer" / "is not selected" — the same labels as `${f}` /
+   * `not(${f})` — but must never be rewritten into them (T9 invariant 1:
+   * the preset is a projection; the stored text wins on save unless the
+   * projection changed). Absent on every clause the user builds.
+   */
+  source?: string;
 }
 
 export type Connector = 'and' | 'or';
@@ -485,9 +498,28 @@ export function isDraftComplete(c: Clause): boolean {
 }
 
 function clauseToRule(c: Clause): Rule {
+  // A hydrated clause carries the author's own spelling. Re-emit it while
+  // it still projects to the same clause (field / op / value); the user
+  // cannot edit a committed clause in place, but a stale `source` on a
+  // clause that no longer matches would otherwise write the OLD text.
+  if (c.source !== undefined) {
+    const parsed = parseRelevant(c.source);
+    const sole = parsed.rules.length === 1 ? parsed.rules[0] : undefined;
+    if (sole && !parsed.isRawFallback) {
+      const projected = ruleToClause(sole);
+      if (
+        projected &&
+        projected.field === c.field &&
+        projected.op === c.op &&
+        projected.value === c.value
+      ) {
+        return sole;
+      }
+    }
+  }
   if (c.op === 'today') return { kind: 'raw', text: 'today()' };
-  if (c.op === 'ref') return { kind: 'raw', text: `\${${c.field}}` };
-  if (c.op === 'not') return { kind: 'raw', text: `not(\${${c.field}})` };
+  if (c.op === 'ref') return { kind: 'truthy', field: c.field, negated: false };
+  if (c.op === 'not') return { kind: 'truthy', field: c.field, negated: true };
   if (c.op === 'selected') {
     return { kind: 'selected', field: c.field, value: c.value, negated: false };
   }
@@ -515,7 +547,21 @@ function ruleToClause(r: Rule): Clause | null {
       value: r.value,
     };
   }
-  // answered / date_offset / age / raw don't have a 1:1 in the Clause shape.
+  if (r.kind === 'truthy') {
+    return { field: r.field, op: r.negated ? 'not' : 'ref', value: '' };
+  }
+  if (r.kind === 'answered') {
+    // `${f} != ''` reads as "has an answer" and `${f} = ''` as "is not
+    // selected" — the same projection as `truthy` — but the spelling is
+    // kept on the clause so an unedited reopen writes back the same bytes.
+    return {
+      field: r.field,
+      op: r.negated ? 'not' : 'ref',
+      value: '',
+      source: serializeRelevant({ combinator: 'and', rules: [r], isRawFallback: false }),
+    };
+  }
+  // date_offset / age / contact-* / raw don't have a 1:1 in the Clause shape.
   return null;
 }
 

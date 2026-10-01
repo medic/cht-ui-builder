@@ -483,6 +483,28 @@ function RuleRow(props: {
       </div>
     );
   }
+  if (rule.kind === 'truthy') {
+    // `${f}` / `not(${f})` — what the inline builder writes for "has an
+    // answer" / "is not selected" (T9b, #15). Same labels here so a rule
+    // reads the same in both builders.
+    return (
+      <div className="row gap rule-row">
+        <FieldPicker
+          value={rule.field}
+          options={props.fieldOptions}
+          onChange={(v) => props.onChange({ ...rule, field: v })}
+        />
+        <select
+          value={rule.negated ? 'not' : 'ref'}
+          onChange={(e) => props.onChange({ ...rule, negated: e.target.value === 'not' })}
+        >
+          <option value="ref">has an answer</option>
+          <option value="not">is not selected</option>
+        </select>
+        <button className="link danger" onClick={props.onRemove}>×</button>
+      </div>
+    );
+  }
   if (rule.kind === 'contact-input-comparison') {
     // Mirrors the ComparisonRule shape but with a datalist on the LHS
     // backed by the project's contact-input field list ∪ the CHT-canonical

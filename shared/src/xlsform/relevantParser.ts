@@ -50,6 +50,26 @@ export interface AnsweredRule {
   negated: boolean;
 }
 
+/**
+ * A field reference used directly as the boolean — `${field}` ("has an
+ * answer" in the inline builder) or `not(${field})` ("is not selected").
+ *
+ * T9b (#15): the inline builder has always WRITTEN these two spellings but
+ * emitted them as `raw`, so on reopen the parser handed back a raw rule and
+ * the builder disabled every control. A rule the tool itself produced must
+ * open in the tool, so they get a real kind. Spacing-divergent spellings
+ * (`${ f }`, `not( ${f} )`) are demoted to raw by the self-check as usual.
+ *
+ * This is NOT the same rule as `answered` (`${f} != ''` / `${f} = ''`): the
+ * two spellings are never rewritten into each other.
+ */
+export interface TruthyRule {
+  kind: 'truthy';
+  field: string;
+  /** True for `not(${field})`. */
+  negated: boolean;
+}
+
 export interface RawRule {
   kind: 'raw';
   text: string;
@@ -156,6 +176,7 @@ export type Rule =
   | ComparisonRule
   | SelectedRule
   | AnsweredRule
+  | TruthyRule
   | DateOffsetRule
   | AgeRule
   | ContactInputComparisonRule
@@ -360,6 +381,13 @@ function parseSinglePart(part: string): Rule {
   if (sel && sel[1] && sel[2] !== undefined) {
     return { kind: 'selected', field: sel[1], value: sel[2], negated: false };
   }
+  // ${field}   or   not(${field})   — the reference itself as the boolean.
+  // Deliberately tight (no inner whitespace): the serializer emits exactly
+  // this shape, and the §3.1 self-check would demote anything looser anyway.
+  const truthy = /^(not\()?\$\{([^}\s]+)\}(\))?$/.exec(t);
+  if (truthy && truthy[2] && Boolean(truthy[1]) === Boolean(truthy[3])) {
+    return { kind: 'truthy', field: truthy[2], negated: truthy[1] !== undefined };
+  }
   // ${field} = ''   or   ${field} != ''
   const ans = /^\$\{\s*([^}\s]+)\s*\}\s*(=|!=)\s*''$/.exec(t);
   if (ans && ans[1]) {
@@ -467,6 +495,9 @@ function ruleToString(rule: Rule): string {
     case 'answered': {
       // Answered = `${f} != ''`; not answered = `${f} = ''`.
       return rule.negated ? `\${${rule.field}} = ''` : `\${${rule.field}} != ''`;
+    }
+    case 'truthy': {
+      return rule.negated ? `not(\${${rule.field}})` : `\${${rule.field}}`;
     }
     case 'date_offset': {
       const op = rule.comparator === 'more_than' ? '>' : '<';
