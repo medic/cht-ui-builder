@@ -1,0 +1,40 @@
+/* T9c (#16) — shared field picker: [search] [select] [show technical rows] */
+.field-picker {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.field-picker-search {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--chip-border, #d1d5db);
+  border-radius: 4px;
+  background: #fff;
+  width: 120px;
+}
+/* Never change the width on focus: a blur-driven relayout moves the
+   neighbouring buttons between mousedown and mouseup and the click is lost. */
+.field-picker-search:focus {
+  outline: 2px solid #c7d2fe;
+}
+.field-picker-select {
+  max-width: 320px;
+}
+/* List mode (search active): a visible box instead of a dropdown. */
+.field-picker-select[size] {
+  display: block;
+  width: 100%;
+  min-width: 260px;
+  max-width: 520px;
+  overflow-y: auto;
+}
+.field-picker-technical {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}

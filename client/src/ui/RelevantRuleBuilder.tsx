@@ -21,6 +21,7 @@ import {
   type Rule,
 } from '@cht-ui/shared';
 import { ChoiceValueInput } from './ChoiceValueInput.js';
+import { SurveyFieldPicker } from './SurveyFieldPicker.js';
 import {
   useContactSummaryBridgeKeys,
   type ContextBridgeKey,
@@ -728,25 +729,37 @@ function FieldPicker(props: {
   options: string[];
   onChange: (v: string) => void;
 }) {
+  // T9c (#16): the shared searchable picker (label + name, sections,
+  // technical rows hidden) with the same custom-name escape as before.
   const inList = props.options.includes(props.value);
+  const [custom, setCustom] = useState<boolean>(() => !inList && props.value !== '');
   return (
     <div className="row gap">
       <span>$&#123;</span>
-      <select value={inList ? props.value : '__custom__'} onChange={(e) => props.onChange(e.target.value === '__custom__' ? props.value : e.target.value)}>
-        {props.options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-        <option value="__custom__">— custom —</option>
-      </select>
-      {!inList && (
+      {custom ? (
         <input
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
           placeholder="field name"
+          aria-label="Custom field name"
+        />
+      ) : (
+        <SurveyFieldPicker
+          value={inList ? props.value : ''}
+          options={props.options}
+          onChange={props.onChange}
+          placeholder="— field —"
+          ariaLabel="Field"
         />
       )}
+      <button
+        type="button"
+        className="link small"
+        onClick={() => setCustom((v) => !v)}
+        title={custom ? 'Pick from this form' : 'Type a field name the picker does not offer'}
+      >
+        {custom ? 'pick' : 'custom'}
+      </button>
       <span>&#125;</span>
     </div>
   );

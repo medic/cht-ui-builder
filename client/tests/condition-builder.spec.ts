@@ -283,6 +283,15 @@ function gravidityRow(page: import('@playwright/test').Page) {
     .filter({ has: page.locator('code.type-chip-raw', { hasText: /^integer$/ }) });
 }
 
+/** Non-empty option values of a <select>, in DOM order (optgroups flattened). */
+async function optionValues(sel: Locator): Promise<string[]> {
+  return await sel.evaluate((el) =>
+    Array.from((el as { options: ArrayLike<{ value: string }> }).options)
+      .map((o) => o.value)
+      .filter((v) => v.length > 0),
+  );
+}
+
 /** Read option text values from a <select>, grouped by their <optgroup> label. */
 async function optgroupSnapshot(sel: Locator): Promise<Record<string, string[]>> {
   return await sel.evaluate((el) => {
@@ -295,7 +304,7 @@ async function optgroupSnapshot(sel: Locator): Promise<Record<string, string[]>>
   });
 }
 
-test('v0.3 — op-first filtering: picking `is more than` groups date/numeric typical, text+choice atypical, still selectable', async ({
+test('v0.3 → T9c — op-typicality orders fields but never withholds one: `>` lists date/numeric first, choice fields still selectable', async ({
   page,
 }) => {
   await page.goto('/');
@@ -311,14 +320,17 @@ test('v0.3 — op-first filtering: picking `is more than` groups date/numeric ty
   await dropdowns.nth(2).selectOption('>');
 
   const fieldSelect = dropdowns.nth(1);
-  const snap = await optgroupSnapshot(fieldSelect);
-  // `lmp_date` (date) typical; `patient_id` (unknown) always-pass;
-  // `lmp_note` (text) atypical for ordering ops; choice fields
-  // (`patient_sex`, danger_signs) atypical too.
-  expect(snap['Typical for this check']).toContain('lmp_date');
-  expect(snap['Typical for this check']).toContain('patient_id');
-  expect(snap['Other fields']).toContain('lmp_note');
-  // Atypical field is STILL selectable (never hard-hidden).
+  const values = await optionValues(fieldSelect);
+  // Since T9c (#16) the picker groups by section (the fixture is flat, so
+  // one list) and uses op-typicality only to ORDER: date/numeric/unknown
+  // first, choice fields after — all present, none hidden by the op.
+  expect(values.indexOf('lmp_date')).toBeLessThan(values.indexOf('patient_sex'));
+  expect(values.indexOf('patient_id')).toBeLessThan(values.indexOf('danger_signs'));
+  expect(values).toContain('patient_sex');
+  expect(values).toContain('danger_signs');
+  // `lmp_note` is a note → technical → withheld until the toggle, not because of the op.
+  expect(values).not.toContain('lmp_note');
+  await strip.getByRole('checkbox', { name: 'show technical rows' }).check();
   await fieldSelect.selectOption('lmp_note');
   await expect(fieldSelect).toHaveValue('lmp_note');
 });
@@ -352,7 +364,7 @@ test('v0.3 — field-first ordering: picking date `lmp_date` groups comparison o
   expect(snap['Common operators']).toContain('<=');
 });
 
-test('v0.3 — Show all fields toggle flattens the field list (escape hatch)', async ({
+test('v0.3 → T9c — "show technical rows" is the only toggle: notes are withheld until it is on, and the op never hides a field', async ({
   page,
 }) => {
   await page.goto('/');
@@ -367,15 +379,20 @@ test('v0.3 — Show all fields toggle flattens the field list (escape hatch)', a
   await dropdowns.nth(2).selectOption('>');
 
   const fieldSelect = dropdowns.nth(1);
-  const beforeSnap = await optgroupSnapshot(fieldSelect);
-  expect(Object.keys(beforeSnap).length).toBeGreaterThanOrEqual(2);
+  // The v0.3 "Show all fields" checkbox is gone (UX review finding 2: it
+  // read as unchecked while everything was shown).
+  await expect(strip.getByRole('checkbox', { name: 'Show all fields' })).toHaveCount(0);
+  const before = await optionValues(fieldSelect);
+  expect(before).not.toContain('lmp_note');
+  // Every non-technical field is offered regardless of the op.
+  for (const n of ['patient_sex', 'patient_id', 'lmp_date', 'danger_signs']) {
+    expect(before).toContain(n);
+  }
 
-  // Toggle on — the persistent "Show all fields" label/checkbox.
-  await strip.getByRole('checkbox', { name: 'Show all fields' }).check();
-
-  // Now flat list (no optgroups).
-  const afterSnap = await optgroupSnapshot(fieldSelect);
-  expect(Object.keys(afterSnap)).toHaveLength(0);
+  await strip.getByRole('checkbox', { name: 'show technical rows' }).check();
+  const after = await optionValues(fieldSelect);
+  expect(after).toContain('lmp_note');
+  expect(after.length).toBe(before.length + 1);
 });
 
 test('v0.3 — `includes` (selected) narrows field list to choice incl. contact-injected sex', async ({
@@ -394,13 +411,13 @@ test('v0.3 — `includes` (selected) narrows field list to choice incl. contact-
   await dropdowns.nth(2).selectOption('selected');
 
   const fieldSelect = dropdowns.nth(1);
-  const snap = await optgroupSnapshot(fieldSelect);
+  const values = await optionValues(fieldSelect);
   // `patient_sex` is choice-upgraded via fieldChoices — its calculation
-  // resolves through to the contact form's `sex` select.
-  expect(snap['Typical for this check']).toContain('patient_sex');
-  expect(snap['Typical for this check']).toContain('danger_signs');
-  // Non-choice rows (date, text) appear under "Other fields", still selectable.
-  expect(snap['Other fields']).toContain('lmp_date');
+  // resolves through to the contact form's `sex` select. Choice fields
+  // come first for `selected`; non-choice rows follow, still selectable.
+  expect(values.indexOf('patient_sex')).toBeLessThan(values.indexOf('lmp_date'));
+  expect(values.indexOf('danger_signs')).toBeLessThan(values.indexOf('lmp_date'));
+  expect(values).toContain('lmp_date');
 });
 
 test('v0.3 — unknown-kind field (`patient_id`) is always-pass: reachable under ordering op `>`', async ({
@@ -418,10 +435,11 @@ test('v0.3 — unknown-kind field (`patient_id`) is always-pass: reachable under
   await dropdowns.nth(2).selectOption('>');
 
   const fieldSelect = dropdowns.nth(1);
-  const snap = await optgroupSnapshot(fieldSelect);
+  const values = await optionValues(fieldSelect);
   // `patient_id` is a `calculate` whose harvested field has no choices →
-  // unknown kind → always-pass.
-  expect(snap['Typical for this check']).toContain('patient_id');
+  // unknown kind → always-pass: listed with the typical fields, before choices.
+  expect(values).toContain('patient_id');
+  expect(values.indexOf('patient_id')).toBeLessThan(values.indexOf('danger_signs'));
 });
 
 test('v0.3 — relabeled op dropdown saves byte-identical canonical XPath (no label leakage)', async ({
