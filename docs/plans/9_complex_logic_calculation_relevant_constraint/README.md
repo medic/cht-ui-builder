@@ -48,7 +48,22 @@ Also found, and not in the June ticket: two reopen defects in the clause codec (
 | 2026-10-01 | 9c (#16) | PR [#25](https://github.com/medic/cht-ui-builder/pull/25), branch `9c_field_picker`, off `master` | `shared/src/xlsform/fieldMeta.ts` + `client/src/ui/SurveyFieldPicker.tsx`: search by label or name, section optgroups, technical rows behind a toggle, choice labels in the value picker and readback, "another question" value mode. The v0.3 typical/other partition and "Show all fields" are gone; op-typicality orders within a section. Harvest calculates (`../inputs/contact/x`) stay pickable. Found: a focus-width change on the search box ate the "+ insert" click. |
 | 2026-10-01 | 9d (#17) | PR [#26](https://github.com/medic/cht-ui-builder/pull/26), branch `9d_add_question_configure`, off `master` | Configure step (required, hint per language, Validation slot = expression + "✎ build" modal + message per language; 9e fills it with presets), "add without details", remembered "always skip". `insertIndexAfterRow` in `surveyEdits.ts`: "+ Question" lands after the focused row (a begin row → first child). New row scrolled, focused, flashed. Playwright profile seeds the skip preference ON for the legacy build specs; the new spec clears it. |
 
-**Open for 9e / 9f.** 9e depends on 9a (#24) and 9d (#26); 9f on 9c (#25) and 9e. None is merged yet, so 9e has to be cut from a merge of `9a_parser_dot_subject` and `9d_add_question_configure` (both touch `FormEditor.tsx`; 9c touches it more). Merging #23 → #24 → #25 → #26 in that order first would let 9e and 9f branch from `master`.
+| 2026-10-01 | 9e (#18) | PR [#27](https://github.com/medic/cht-ui-builder/pull/27), branch `9e_validation_panel`, cut from the 9a tip with 9d merged in (stacked on #24 and #26) | `shared/src/validation/presets.ts` (preset model, recogniser, emitter; `source` per item wins on save) + `client/src/ui/ValidationPanel.tsx` (replaces the constraint expression field, the strip's constraint column and the modal for that column; mounted in the 9d configure step). Parser gained optional `ParsedExpression.separators` so chains broken across a newline or a double space open. Every preset compiles with pyxform 4.5 `xls2xform`. See the count below. |
+
+**777-rule count after 9e** (same seven configs, `constraint` column, through `parseValidation` → `serializeValidation`):
+
+| | Cells |
+| --- | ---: |
+| open entirely as presets | **575** |
+| presets plus one plain-text item | 61 |
+| `true` / `true()` / `1` placeholders, labelled "always passes" | 51 |
+| plain text only | 90 |
+| drift (serialize ∘ parse) | 0 |
+| parser-level structured (any kind, no raw part) | 730 (682 before separators) |
+
+Against the 726 non-placeholder rules that is 636 fully or partly as presets (target was about 705). What stays plain text: mixed `and` / `or` inside `not(…)` (the 27-cell nssd ethnicity rule and the 8 `primary_condition` / `secondary_condition` ones), curly quotes (`’none’`, 5), `decimal-date-time` / `date-time(floor(…))` arithmetic (about 20), `add-date(today(), 0, 0, -N)` (5; the function's argument order is not modelled), the 6 cross-field rules, and `int(.) > int(${f}) + 9` (16, one `code` item next to three presets). Phase 2 presets (fixed date, "[Other] alone" via the `or` spelling, choose at least/at most N) cover 15 more.
+
+**Open for 9f.** 9f depends on 9c (#25) and 9e (#27). Cut it from the 9e tip with `9c_field_picker` merged in. Merge order for the open PRs: #23 → #24 → #25 → #26 → #27.
 
 **777-rule count after 9a** (seven analysis configs, `constraint` column, "opens" = `parseRelevantGrouped` returns no raw part):
 
