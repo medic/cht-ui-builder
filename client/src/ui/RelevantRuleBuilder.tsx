@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import {
   parseRelevant,
   serializeRelevant,
+  serializeRule,
   type ContextWrapper,
   type DateOffsetComparator,
   type DateOffsetDirection,
@@ -483,6 +484,28 @@ function RuleRow(props: {
       </div>
     );
   }
+  if (rule.kind === 'truthy') {
+    // `${f}` / `not(${f})` — what the inline builder writes for "has an
+    // answer" / "is not selected" (T9b, #15). Same labels here so a rule
+    // reads the same in both builders.
+    return (
+      <div className="row gap rule-row">
+        <FieldPicker
+          value={rule.field}
+          options={props.fieldOptions}
+          onChange={(v) => props.onChange({ ...rule, field: v })}
+        />
+        <select
+          value={rule.negated ? 'not' : 'ref'}
+          onChange={(e) => props.onChange({ ...rule, negated: e.target.value === 'not' })}
+        >
+          <option value="ref">has an answer</option>
+          <option value="not">is not selected</option>
+        </select>
+        <button className="link danger" onClick={props.onRemove}>×</button>
+      </div>
+    );
+  }
   if (rule.kind === 'contact-input-comparison') {
     // Mirrors the ComparisonRule shape but with a datalist on the LHS
     // backed by the project's contact-input field list ∪ the CHT-canonical
@@ -579,6 +602,29 @@ function RuleRow(props: {
           />
           string
         </label>
+        <button className="link danger" onClick={props.onRemove}>×</button>
+      </div>
+    );
+  }
+  if (
+    rule.kind === 'expr-comparison' ||
+    rule.kind === 'predicate' ||
+    rule.kind === 'not-group' ||
+    rule.kind === 'always-true'
+  ) {
+    // T9a (#14): rules about the answer itself (`. >= 0`, `regex(., '…')`,
+    // `not(selected(., 'none') and …)`, `true`) parse structurally now but
+    // have no visual row until the Validation panel (9e). Show the text the
+    // author wrote; an edit turns it into a raw fragment, exactly as before.
+    return (
+      <div className="row gap rule-row">
+        <input
+          value={serializeRule(rule)}
+          onChange={(e) => props.onChange({ kind: 'raw', text: e.target.value })}
+          placeholder="expression"
+          className="raw-rule-input"
+          aria-label="Rule about this answer"
+        />
         <button className="link danger" onClick={props.onRemove}>×</button>
       </div>
     );

@@ -38,6 +38,7 @@ import {
   type ReportFieldChoice,
   type ParsedCalculation,
   type ParsedExpression,
+  serializeRule,
 } from '@cht-ui/shared';
 import { useApp } from '../state/store.js';
 import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
@@ -1341,6 +1342,15 @@ function conditionProse(cond: ParsedExpression): string {
     }
     if (r.kind === 'answered') {
       return `\${${r.field}} ${r.negated ? 'is empty' : 'is answered'}`;
+    }
+    if (r.kind === 'truthy') {
+      return `\${${r.field}} ${r.negated ? 'is not selected' : 'has an answer'}`;
+    }
+    if (r.kind === 'expr-comparison' || r.kind === 'predicate' || r.kind === 'not-group') {
+      return serializeRule(r); // T9a — shown as written until 9e gives presets
+    }
+    if (r.kind === 'always-true') {
+      return 'always passes';
     }
     if (r.kind === 'age') {
       return `age of \${${r.field}} ${r.op} ${r.value} years`;
