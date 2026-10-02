@@ -92,6 +92,8 @@ export const test = base.extend<{ scratch: string }>({
     await page.close();
     if (video) {
       await fs.mkdir(DEMO_DIR, { recursive: true });
+      // The replay notes live beside the specs and beside the videos.
+      await fs.copyFile(path.join(here, 'README.md'), path.join(DEMO_DIR, 'README.md'));
       const ticket = path.basename(testInfo.file).replace(/\.demo\.spec\.ts$/, '');
       const dest = path.join(DEMO_DIR, `${ticket}.webm`);
       await video.saveAs(dest);
