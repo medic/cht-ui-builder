@@ -1,12 +1,15 @@
 /**
  * Shared helpers for the T9 feature demos. Each `*.demo.spec.ts` is one
  * continuous take with on-screen captions; the video lands in
- * `client/demo/t9/<ticket>.webm` (gitignored) when the page closes.
+ * `client/demo/t9/<ticket>.webm` (plus an .mp4 when ffmpeg is installed)
+ * when the page closes, next to `client/demo/t9/README.md`, which says what
+ * each video shows and how to replay it by hand.
  *
  * Run with `playwright.demo.config.ts` — that config turns video on and
  * slows actions down; under the normal config these specs are ignored.
  */
 import { test as base, expect, type Locator, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -94,6 +97,18 @@ export const test = base.extend<{ scratch: string }>({
       await video.saveAs(dest);
       testInfo.annotations.push({ type: 'video', description: dest });
       console.log(`[demo] ${ticket} → ${dest}`);
+      // An MP4 beside it for GitHub issue comments, when ffmpeg is on PATH.
+      try {
+        const mp4 = dest.replace(/\.webm$/, '.mp4');
+        execFileSync(
+          'ffmpeg',
+          ['-y', '-loglevel', 'error', '-i', dest, '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4],
+          { stdio: 'ignore' },
+        );
+        console.log(`[demo] ${ticket} → ${mp4}`);
+      } catch {
+        /* no ffmpeg: the .webm is still there */
+      }
     }
   },
 });

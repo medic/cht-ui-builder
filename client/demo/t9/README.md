@@ -1,7 +1,8 @@
 # T9 demo recordings — what each video shows and how to replay it
 
-One video per sub-issue of the "complex logic" epic (#9). Each is a Playwright
-run with slow-motion actions and a caption bar at the bottom. The same steps
+One video per sub-issue of the "complex logic" epic (#9), in this folder as
+`<ticket>.mp4` (for GitHub) and `<ticket>.webm`. Each is a Playwright run with
+slow-motion actions and a caption bar at the bottom. The same steps
 can be done by hand in the editor; every demo runs on a throwaway copy of the
 bundled sample project, so nothing you do here touches a real config.
 
@@ -24,7 +25,8 @@ save and reload. Checking what was saved: open the sheet, or call
 
 To re-record all seven: from `client/`, `npx playwright test -c
 playwright.demo.config.ts` (one spec: add `tests/t9-demos/t9e.demo.spec.ts`).
-Videos land in `client/demo/t9/<ticket>.webm`. `DEMO_MS=800` slows it down.
+Videos land in this folder as `.webm` and, when ffmpeg is installed, `.mp4`.
+`DEMO_MS=800` slows it down. The specs are in `client/tests/t9-demos/`.
 
 ---
 
