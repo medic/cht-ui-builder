@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import {
   parseRelevant,
   serializeRelevant,
+  serializeRule,
   type ContextWrapper,
   type DateOffsetComparator,
   type DateOffsetDirection,
@@ -20,6 +21,7 @@ import {
   type Rule,
 } from '@cht-ui/shared';
 import { ChoiceValueInput } from './ChoiceValueInput.js';
+import { SurveyFieldPicker } from './SurveyFieldPicker.js';
 import {
   useContactSummaryBridgeKeys,
   type ContextBridgeKey,
@@ -483,6 +485,28 @@ function RuleRow(props: {
       </div>
     );
   }
+  if (rule.kind === 'truthy') {
+    // `${f}` / `not(${f})` — what the inline builder writes for "has an
+    // answer" / "is not selected" (T9b, #15). Same labels here so a rule
+    // reads the same in both builders.
+    return (
+      <div className="row gap rule-row">
+        <FieldPicker
+          value={rule.field}
+          options={props.fieldOptions}
+          onChange={(v) => props.onChange({ ...rule, field: v })}
+        />
+        <select
+          value={rule.negated ? 'not' : 'ref'}
+          onChange={(e) => props.onChange({ ...rule, negated: e.target.value === 'not' })}
+        >
+          <option value="ref">has an answer</option>
+          <option value="not">is not selected</option>
+        </select>
+        <button className="link danger" onClick={props.onRemove}>×</button>
+      </div>
+    );
+  }
   if (rule.kind === 'contact-input-comparison') {
     // Mirrors the ComparisonRule shape but with a datalist on the LHS
     // backed by the project's contact-input field list ∪ the CHT-canonical
@@ -579,6 +603,29 @@ function RuleRow(props: {
           />
           string
         </label>
+        <button className="link danger" onClick={props.onRemove}>×</button>
+      </div>
+    );
+  }
+  if (
+    rule.kind === 'expr-comparison' ||
+    rule.kind === 'predicate' ||
+    rule.kind === 'not-group' ||
+    rule.kind === 'always-true'
+  ) {
+    // T9a (#14): rules about the answer itself (`. >= 0`, `regex(., '…')`,
+    // `not(selected(., 'none') and …)`, `true`) parse structurally now but
+    // have no visual row until the Validation panel (9e). Show the text the
+    // author wrote; an edit turns it into a raw fragment, exactly as before.
+    return (
+      <div className="row gap rule-row">
+        <input
+          value={serializeRule(rule)}
+          onChange={(e) => props.onChange({ kind: 'raw', text: e.target.value })}
+          placeholder="expression"
+          className="raw-rule-input"
+          aria-label="Rule about this answer"
+        />
         <button className="link danger" onClick={props.onRemove}>×</button>
       </div>
     );
@@ -682,25 +729,37 @@ function FieldPicker(props: {
   options: string[];
   onChange: (v: string) => void;
 }) {
+  // T9c (#16): the shared searchable picker (label + name, sections,
+  // technical rows hidden) with the same custom-name escape as before.
   const inList = props.options.includes(props.value);
+  const [custom, setCustom] = useState<boolean>(() => !inList && props.value !== '');
   return (
     <div className="row gap">
       <span>$&#123;</span>
-      <select value={inList ? props.value : '__custom__'} onChange={(e) => props.onChange(e.target.value === '__custom__' ? props.value : e.target.value)}>
-        {props.options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-        <option value="__custom__">— custom —</option>
-      </select>
-      {!inList && (
+      {custom ? (
         <input
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
           placeholder="field name"
+          aria-label="Custom field name"
+        />
+      ) : (
+        <SurveyFieldPicker
+          value={inList ? props.value : ''}
+          options={props.options}
+          onChange={props.onChange}
+          placeholder="— field —"
+          ariaLabel="Field"
         />
       )}
+      <button
+        type="button"
+        className="link small"
+        onClick={() => setCustom((v) => !v)}
+        title={custom ? 'Pick from this form' : 'Type a field name the picker does not offer'}
+      >
+        {custom ? 'pick' : 'custom'}
+      </button>
       <span>&#125;</span>
     </div>
   );

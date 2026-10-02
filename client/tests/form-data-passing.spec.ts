@@ -72,6 +72,11 @@ async function openRelevantBuilderOnGravidity(page: Page) {
   const relField = exprField(gravRow, 'relevant', page);
   // Build button is inside a <label>, so its accessible name is the whole
   // field label — match on visible text instead of role-name.
+  // T9f (#19): the XPath box (and its "✎ build") sits behind the strip's "code" toggle.
+  const codeBtn = gravRow
+    .locator('.cond-strip-unified[data-column="relevant"]')
+    .getByRole('button', { name: 'code', exact: true });
+  if (await codeBtn.isVisible().catch(() => false)) await codeBtn.click();
   await relField.locator('button', { hasText: 'build' }).click();
   const builder = page.locator('.rule-builder-card').filter({ hasText: 'Rule builder' });
   await expect(builder).toBeVisible();
