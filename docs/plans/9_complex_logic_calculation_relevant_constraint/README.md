@@ -52,6 +52,8 @@ Also found, and not in the June ticket: two reopen defects in the clause codec (
 
 | 2026-10-01 | 9g (#20) | PR [#28](https://github.com/medic/cht-ui-builder/pull/28), branch `9g_audit_close`, stacked on #27 | `four-builders.spec.ts` (acceptance 3) and `live-instance-check.spec.ts` (acceptance 4: deploy with cht-conf in the image, drive the local CHT 5.2.0 as the CHW; report `01a0f7da-9c2b-766d-90aa-3aabfd8dd6be`). The status table above and the #9 checklist are updated. Every preset also compiles with cht-conf `convert-app-forms` in the image. |
 
+| 2026-10-02 | 9f (#19) | PR [#29](https://github.com/medic/cht-ui-builder/pull/29), branch `9f_sentence_editor`, cut from the 9g tip with `9c_field_picker` merged in (stacked on #28) | Advanced panel regrouped Logic / Display / Messages / Raw. One sentence-shaped editor per logic column ("Show this question when …", "Filter the choice list when …"), plain-English readback from the first clause using question and choice labels, XPath and the "✎ build" modal behind a per-column "code" toggle (a rule the editor cannot show opens with its XPath visible), collapsed rows summarise logic in words, "Compute the value as…" only on calculate rows or on request. Bytes unchanged (`../lmp_date != ''` re-emits as written). `sentence-editor.spec.ts` covers acceptance 1 and 3. Also: captioned demo recordings for every slice (`client/tests/t9-demos/`, `playwright.demo.config.ts` → `client/demo/t9/<ticket>.webm`), and the `string` checkbox regression in `geriatric-build 9` from the 9c picker's second checkbox is fixed in the specs. |
+
 **777-rule count after 9e** (same seven configs, `constraint` column, through `parseValidation` → `serializeValidation`):
 
 | | Cells |
@@ -65,7 +67,7 @@ Also found, and not in the June ticket: two reopen defects in the clause codec (
 
 Against the 726 non-placeholder rules that is 636 fully or partly as presets (target was about 705). What stays plain text: mixed `and` / `or` inside `not(…)` (the 27-cell nssd ethnicity rule and the 8 `primary_condition` / `secondary_condition` ones), curly quotes (`’none’`, 5), `decimal-date-time` / `date-time(floor(…))` arithmetic (about 20), `add-date(today(), 0, 0, -N)` (5; the function's argument order is not modelled), the 6 cross-field rules, and `int(.) > int(${f}) + 9` (16, one `code` item next to three presets). Phase 2 presets (fixed date, "[Other] alone" via the `or` spelling, choose at least/at most N) cover 15 more.
 
-**Open for 9f.** 9f depends on 9c (#25) and 9e (#27). Cut it from the 9e tip with `9c_field_picker` merged in. Merge order for the open PRs: #23 → #24 → #25 → #26 → #27.
+**All seven slices are in PRs.** Merge order: #23 → #24 → #25 → #26 → #27 → #28 → #29; each later PR is stacked on the previous one, so its diff collapses to its own commit once the predecessor lands. Four e2e failures pre-date the epic on master (`demo.spec.ts` 1 and 4, `geriatric-build.spec.ts` 7 and 8) and are not in scope.
 
 **777-rule count after 9a** (seven analysis configs, `constraint` column, "opens" = `parseRelevantGrouped` returns no raw part):
 
