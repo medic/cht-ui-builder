@@ -74,13 +74,12 @@ test('T9g — all four builders in one journey; every emitted cell asserted on d
     // 1. relevant — the inline strip: gravidity shows when chair_rise includes pass.
     const gravidity = rowByType(page, /^integer$/);
     await showAdvanced(gravidity);
-    const strip = gravidity.locator('.cond-strip-unified');
+    const strip = gravidity.locator('.cond-strip-unified[data-column="relevant"]');
     const dd = strip.locator('.ref-chip-select');
-    await dd.nth(0).selectOption('relevant');
-    await dd.nth(1).selectOption('chair_rise');
-    await dd.nth(2).selectOption('selected');
+    await dd.nth(0).selectOption('chair_rise');
+    await dd.nth(1).selectOption('selected');
     await strip.locator('select[title="Pick a value from this field\'s choices"]').selectOption('pass');
-    await strip.getByRole('button', { name: '+ insert' }).click();
+    await strip.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(rawColumnInput(gravidity, 'relevant')).toHaveValue("selected(${chair_rise}, 'pass')");
 
     // 2. constraint — the Validation panel: Between 0 and 20 with a message.
@@ -95,13 +94,12 @@ test('T9g — all four builders in one journey; every emitted cell asserted on d
     //    field — the picker never offers a later one).
     const chair = rowByType(page, /^select_one pass_fail$/);
     await showAdvanced(chair);
-    const cStrip = chair.locator('.cond-strip-unified');
+    const cStrip = chair.locator('.cond-strip-unified[data-column="choice_filter"]');
     const ddd = cStrip.locator('.ref-chip-select');
-    await ddd.nth(0).selectOption('choice_filter');
-    await ddd.nth(1).selectOption('danger_signs');
-    await ddd.nth(2).selectOption('selected');
+    await ddd.nth(0).selectOption('danger_signs');
+    await ddd.nth(1).selectOption('selected');
     await cStrip.locator('select[title="Pick a value from this field\'s choices"]').selectOption('vaginal_bleeding');
-    await cStrip.getByRole('button', { name: '+ insert' }).click();
+    await cStrip.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(rawColumnInput(chair, 'choice_filter')).toHaveValue("selected(${danger_signs}, 'vaginal_bleeding')");
 
     // 4. calculation — the calculation builder on a fresh calculate row.

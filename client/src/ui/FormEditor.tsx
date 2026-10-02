@@ -46,6 +46,7 @@ import {
   planUngroup,
   defaultInsertIndex,
   insertIndexAfterRow,
+  parseValidation,
   extractListName,
   renameListInType,
   renameChoiceValue,
@@ -94,7 +95,8 @@ import { InlineChoicesEditor } from './InlineChoicesEditor.js';
 import { ChoiceNameInput } from './ChoiceNameInput.js';
 import { InsertLabelRefButton } from './InsertLabelRefButton.js';
 import { ValidationPanel } from './ValidationPanel.js';
-import { FieldMetaProvider, SurveyFieldPicker } from './SurveyFieldPicker.js';
+import { FieldMetaProvider, SurveyFieldPicker, useFieldMeta } from './SurveyFieldPicker.js';
+import './ConditionEditor.css';
 import { useHistory } from '../state/useHistory.js';
 import { showUndoToast } from './UndoToast.js';
 
@@ -2127,10 +2129,64 @@ function SurveyRowCard(props: {
   };
   const { row, violations } = props;
   const structural = isStructural(row);
-  const expressionsPreview = ['relevant', 'calculation', 'constraint', 'appearance']
-    .map((c) => (row.extras[c] ? `${c}: ${row.extras[c]}` : null))
+  // T9f (#19) — the collapsed caption reads in plain English, never XPath:
+  // the rule chips the editors would show, or a count where there is no
+  // clause form. The XPath itself sits behind each editor's "code" toggle.
+  const fieldMetaForSummary = useFieldMeta();
+  const summaryFieldLabel = (n: string): string => fieldMetaForSummary.get(n)?.label || n;
+  const summaryChoiceLabel = (field: string, value: string): string =>
+    props.fieldChoiceOptions[field]?.find((c) => c.name === value)?.label ?? value;
+  function logicSummary(column: ConditionColumn, lead: string): string | null {
+    const text = row.extras[column];
+    if (!text) return null;
+    const hydrated = conditionBuilderReducer(initialConditionBuilderState, {
+      kind: 'set-column',
+      column,
+      existingValue: text,
+    });
+    if (hydrated.rawFallback !== null) return `${lead} (hand-written rule)`;
+    const flat =
+      hydrated.groups === null
+        ? hydrated.clauses
+            .map((c, i) =>
+              `${i > 0 ? ` ${CONNECTOR_LABELS[hydrated.connectors[i - 1] ?? 'and']} ` : ''}${clauseToProse(c, summaryChoiceLabel, summaryFieldLabel)}`,
+            )
+            .join('')
+        : hydrated.groups
+            .map((g) => `(${g.clauses.map((c) => clauseToProse(c, summaryChoiceLabel, summaryFieldLabel)).join(` ${CONNECTOR_LABELS[g.connector]} `)})`)
+            .join(` ${CONNECTOR_LABELS[hydrated.outerConnector ?? 'and']} `);
+    return flat ? `${lead} ${flat}` : null;
+  }
+  const validationCount = row.extras['constraint'] ? parseValidation(row.extras['constraint']).items.length : 0;
+  const expressionsPreview = [
+    logicSummary('relevant', 'shows when'),
+    logicSummary('choice_filter', 'choices filtered when'),
+    validationCount > 0 ? `${validationCount} validation rule${validationCount === 1 ? '' : 's'}` : null,
+    row.extras['calculation'] ? 'computed' : null,
+    row.extras['appearance'] ? `appearance: ${row.extras['appearance']}` : null,
+  ]
     .filter(Boolean)
     .join('  ·  ');
+
+  // T9f — per-column "code" toggles and the opt-in "compute this value…".
+  // A hand-written rule the sentence editor cannot show opens with its
+  // XPath visible (the author has nothing else to edit); the toggle still
+  // overrides either way.
+  const [codeFor, setCodeFor] = useState<Record<string, boolean>>({});
+  const isHandWritten = (column: ConditionColumn): boolean => {
+    const text = row.extras[column];
+    if (!text) return false;
+    return (
+      conditionBuilderReducer(initialConditionBuilderState, {
+        kind: 'set-column',
+        column,
+        existingValue: text,
+      }).rawFallback !== null
+    );
+  };
+  const codeShown = (column: ConditionColumn): boolean => codeFor[column] ?? isHandWritten(column);
+  const [showCalculation, setShowCalculation] = useState(false);
+  const isCalculateRow = row.type.trim().toLowerCase() === 'calculate';
 
   // Wave 2 §5a — splice `${name}` into the label at the tracked caret.
   // Row-scoped `props.update` is sufficient here — no form-level rows
@@ -2286,14 +2342,30 @@ function SurveyRowCard(props: {
                   ref={(el) => {
                     labelInputRefs.current[loc] = el;
                   }}
-                  value={row.labels[loc] ?? ''}
+                  // T9f (#19) — `NO_LABEL` (the pyxform convention on
+                  // calculates) is shown as an empty box with a hint, never as
+                  // literal text; it is written back unchanged unless the author
+                  // types a real label.
+                  value={row.labels[loc] === 'NO_LABEL' ? '' : (row.labels[loc] ?? '')}
                   onChange={(e) =>
                     props.update((r) => ({
                       ...r,
-                      labels: { ...r.labels, [loc]: e.target.value },
+                      labels: {
+                        ...r.labels,
+                        [loc]:
+                          e.target.value === '' && r.labels[loc] === 'NO_LABEL'
+                            ? 'NO_LABEL'
+                            : e.target.value,
+                      },
                     }))
                   }
-                  placeholder={isMissing ? 'Add translation…' : `label in ${loc}`}
+                  placeholder={
+                    row.labels[loc] === 'NO_LABEL'
+                      ? 'no label (NO_LABEL)'
+                      : isMissing
+                        ? 'Add translation…'
+                        : `label in ${loc}`
+                  }
                 />
                 {/* Wave 2 §5 — insert-field / insert-contact-field popover.
                      Suppressed on structural rows (begin/end group/repeat) —
@@ -2325,38 +2397,89 @@ function SurveyRowCard(props: {
                 patch={props.patch}
               />
             )}
+            {/* T9f (#19) — the advanced panel in four groups: Logic, Display,
+                 Messages, Raw. One sentence-shaped editor per logic column;
+                 the XPath cell and the advanced modal sit behind "code". */}
+            <h4 className="advanced-section">Logic</h4>
             <UnifiedConditionBuilder
+              column="relevant"
+              value={row.extras['relevant'] ?? ''}
+              onChange={(v) => setExtra('relevant', v)}
               fieldOptions={props.fieldOptions}
               fieldChoices={props.fieldChoices}
               fieldChoiceOptions={props.fieldChoiceOptions}
               fieldKinds={props.fieldKinds}
-              getColumn={(col) => row.extras[col] ?? ''}
-              setColumn={(col, value) => setExtra(col, value)}
+              showCode={codeShown('relevant')}
+              onToggleCode={() => setCodeFor((c) => ({ ...c, relevant: !codeShown('relevant') }))}
             />
-            <ExpressionField
-              label="relevant"
-              friendlyLabel="Show this question when…"
-              hint="leave blank to always show"
-              helpText="XPath expression. The question is hidden until this is true. References other fields via ${name}."
-              value={row.extras['relevant'] ?? ''}
-              onChange={(v) => setExtra('relevant', v)}
-              fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
-              inputContactFields={props.inputContactFields}
-              contextKeys={props.contextKeys}
-            />
-            <ExpressionField
-              label="calculation"
-              friendlyLabel="Compute the value as…"
-              hint="for calculate or hidden fields"
-              helpText="XPath that computes this field's value from other fields. Common for `calculate` rows; can also pre-fill a regular question."
-              value={row.extras['calculation'] ?? ''}
-              onChange={(v) => setExtra('calculation', v)}
-              fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
-              inputContactFields={props.inputContactFields}
-              contextKeys={props.contextKeys}
-            />
+            <div hidden={!codeShown('relevant')} className="cond-code-box">
+              <ExpressionField
+                label="relevant"
+                friendlyLabel="Show this question when…"
+                hint="leave blank to always show"
+                helpText="XPath expression. The question is hidden until this is true. References other fields via ${name}."
+                value={row.extras['relevant'] ?? ''}
+                onChange={(v) => setExtra('relevant', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                inputContactFields={props.inputContactFields}
+                contextKeys={props.contextKeys}
+              />
+            </div>
+            {isSelectRow(row) && (
+              <UnifiedConditionBuilder
+                column="choice_filter"
+                value={row.extras['choice_filter'] ?? ''}
+                onChange={(v) => setExtra('choice_filter', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoices={props.fieldChoices}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                fieldKinds={props.fieldKinds}
+                showCode={codeShown('choice_filter')}
+                onToggleCode={() => setCodeFor((c) => ({ ...c, choice_filter: !codeShown('choice_filter') }))}
+              />
+            )}
+            {isSelectRow(row) && (
+              <div hidden={!codeShown('choice_filter')} className="cond-code-box">
+              <ExpressionField
+                label="choice_filter"
+                friendlyLabel="Filter the choice list when…"
+                hint="only for select questions"
+                helpText="XPath evaluated per choice row. Use the choices sheet's filter-category column with this to show only matching options."
+                value={row.extras['choice_filter'] ?? ''}
+                onChange={(v) => setExtra('choice_filter', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                inputContactFields={props.inputContactFields}
+                contextKeys={props.contextKeys}
+              />
+              </div>
+            )}
+            {/* "Compute the value as…" only for calculate rows, or on request:
+                 a plain Number question has no business showing it. */}
+            {(isCalculateRow || row.extras['calculation'] || showCalculation) ? (
+              <ExpressionField
+                label="calculation"
+                friendlyLabel="Compute the value as…"
+                hint={isCalculateRow ? 'the value of this calculate row' : 'pre-fills this question'}
+                helpText="XPath that computes this field's value from other fields. Common for `calculate` rows; can also pre-fill a regular question."
+                value={row.extras['calculation'] ?? ''}
+                onChange={(v) => setExtra('calculation', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                inputContactFields={props.inputContactFields}
+                contextKeys={props.contextKeys}
+              />
+            ) : (
+              <button
+                type="button"
+                className="link small"
+                onClick={() => setShowCalculation(true)}
+                title="Add an XPath that pre-fills this question's value"
+              >
+                + compute this value…
+              </button>
+            )}
             {/* T9e (#18) — the Validation panel replaces the constraint
                  expression field, the strip's constraint column and the
                  "✎ build" modal for this column. Messages live beside the
@@ -2391,20 +2514,7 @@ function SurveyRowCard(props: {
               fieldOptions={props.fieldOptions}
               choices={props.fieldChoiceOptions[row.name] ?? []}
             />
-            {isSelectRow(row) && (
-              <ExpressionField
-                label="choice_filter"
-                friendlyLabel="Filter the choice list when…"
-                hint="only for select questions"
-                helpText="XPath evaluated per choice row. Use the choices sheet's filter-category column with this to show only matching options."
-                value={row.extras['choice_filter'] ?? ''}
-                onChange={(v) => setExtra('choice_filter', v)}
-                fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
-                inputContactFields={props.inputContactFields}
-                contextKeys={props.contextKeys}
-              />
-            )}
+            <h4 className="advanced-section">Display</h4>
             <AppearanceField
               value={row.extras['appearance'] ?? ''}
               rowType={row.type}
@@ -2433,8 +2543,9 @@ function SurveyRowCard(props: {
                 onChange={(v) => setExtra('repeat_count', v)}
               />
             )}
+            <h4 className="advanced-section">Messages</h4>
             <details className="raw-extras">
-              <summary>Hints &amp; error messages</summary>
+              <summary>Help text (hints) — error messages live in Validation above</summary>
               <div className="hints-grid">
                 {props.locales
                   .filter((loc) => !props.hiddenLocales.has(loc))
@@ -2452,6 +2563,7 @@ function SurveyRowCard(props: {
                 {/* constraint_message inputs moved into the Validation panel (T9e). */}
               </div>
             </details>
+            <h4 className="advanced-section">Raw</h4>
             <details className="raw-extras">
               <summary>Raw column overrides (preserved from xlsx)</summary>
               {Object.entries(row.extras)
@@ -2482,9 +2594,7 @@ function SurveyRowCard(props: {
             </details>
           </div>
         )}
-        {!expanded && expressionsPreview && (
-          <div className="expr-preview muted">{expressionsPreview}</div>
-        )}
+        {/* T9f — the code bar that repeated the toggle caption is gone. */}
         {violations.length > 0 && (
           <div className="violation-banner">
             <strong>Dependency issue:</strong>{' '}
@@ -2963,13 +3073,6 @@ const COND_OPS_NEED_VALUE: CondOp[] = ['=', '!=', '>', '<', '>=', '<=', 'selecte
 // not a boolean, and is edited via the dedicated CalculationBuilder
 // (mounted by ExpressionField when `supportsCalculation` holds). See
 // docs/plans/calculation-builder.md v0.2 §3.6 — "double-door" fix.
-// T9e (#18): `constraint` is no longer offered here — the Validation panel
-// owns that column (presets per question type, messages beside the rule).
-const COLUMN_OPTIONS = [
-  { value: 'relevant', label: 'Show when… (relevant)' },
-  { value: 'choice_filter', label: 'Filter choices when… (choice_filter)' },
-] as const;
-
 /** Microcopy per plan §10. */
 const CONNECTOR_LABELS = { and: 'and also', or: 'or instead' } as const;
 
@@ -3065,18 +3168,25 @@ function clauseToProse(
   c: Clause,
   /** T9c (#16) — choice label for readback; the clause keeps the name. */
   labelFor: (field: string, value: string) => string = (_f, v) => v,
+  /** T9f (#19) — question label for readback; the clause keeps the name. */
+  fieldLabel: (field: string) => string = (f) => f,
 ): string {
+  const f = fieldLabel(c.field);
+  // A `${other}` value reads as that question's label too.
+  const v = /^\$\{([^}]+)\}$/.test(c.value)
+    ? fieldLabel(c.value.slice(2, -1))
+    : c.value;
   if (c.op === '=' || c.op === '!=') {
-    return `${c.field} ${COMPARISON_PROSE[c.op]} ${labelFor(c.field, c.value)}`;
+    return `${f} ${COMPARISON_PROSE[c.op]} ${labelFor(c.field, v)}`;
   }
   if (c.op === '>' || c.op === '<' || c.op === '>=' || c.op === '<=') {
-    return `${c.field} ${COMPARISON_PROSE[c.op]} ${c.value}`;
+    return `${f} ${COMPARISON_PROSE[c.op]} ${v}`;
   }
-  if (c.op === 'selected') return `${c.field} includes ${labelFor(c.field, c.value)}`;
-  if (c.op === 'selected-not') return `${c.field} does not include ${labelFor(c.field, c.value)}`;
-  if (c.op === 'not') return `not(\${${c.field}})`;
-  if (c.op === 'ref') return `\${${c.field}}`;
-  return 'today()';
+  if (c.op === 'selected') return `${f} includes ${labelFor(c.field, c.value)}`;
+  if (c.op === 'selected-not') return `${f} does not include ${labelFor(c.field, c.value)}`;
+  if (c.op === 'not') return `${f} is not selected`;
+  if (c.op === 'ref') return `${f} has an answer`;
+  return 'today';
 }
 
 /**
@@ -3105,7 +3215,22 @@ function clauseToProse(
  *     show the banner and keep chaining disabled; the existing text stays
  *     visible + editable in the ExpressionField below.
  */
+/** Lead-in sentence per logic column (T9f, #19). */
+const COLUMN_LEAD: Record<ConditionColumn, { lead: string; readback: string }> = {
+  relevant: { lead: 'Show this question when', readback: 'This row shows when:' },
+  constraint: { lead: 'Accept the answer only if', readback: 'The answer is accepted when:' },
+  choice_filter: { lead: 'Filter the choice list when', readback: 'Choices are filtered when:' },
+};
+
 function UnifiedConditionBuilder(props: {
+  /**
+   * T9f (#19) — the editor is bound to ONE column; the column is implied by
+   * the field being edited, never chosen from a dropdown.
+   */
+  column: ConditionColumn;
+  /** The cell's current text. The editor re-hydrates whenever it changes from outside. */
+  value: string;
+  onChange: (value: string) => void;
   fieldOptions: string[];
   fieldChoices: Record<string, string[]>;
   /** T9c (#16) — same map with labels, for the value picker and readback. */
@@ -3113,18 +3238,24 @@ function UnifiedConditionBuilder(props: {
   /** FieldKind per field name. Missing keys fall through to 'unknown'
    *  (always-pass) — see plan v0.3 §3 never-de-emphasize contract. */
   fieldKinds: Record<string, FieldKind>;
-  getColumn: (col: string) => string;
-  setColumn: (col: string, value: string) => void;
+  /** The "code" toggle: shows the XPath cell and the advanced builder below. */
+  showCode: boolean;
+  onToggleCode: () => void;
 }) {
   const [state, dispatch] = useReducer(conditionBuilderReducer, initialConditionBuilderState);
+  const fieldMeta = useFieldMeta();
+  const fieldLabel = (name: string): string => fieldMeta.get(name)?.label || name;
 
-  // Whenever the user picks a column, hydrate the reducer from its
-  // existing value. parseRelevantGrouped routes anything outside our
-  // grammar to rawFallback (chaining disabled, text preserved).
-  function onPickColumn(col: ConditionColumn | ''): void {
-    const existingValue = col ? props.getColumn(col) : '';
-    dispatch({ kind: 'set-column', column: col, existingValue });
-  }
+  // Hydrate from the cell on mount and whenever it changes from outside
+  // (the code box, undo). Our own writes echo back as the same text, so
+  // they do not re-hydrate mid-edit. parseRelevantGrouped routes anything
+  // outside our grammar to rawFallback (chaining disabled, text preserved).
+  const lastWritten = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastWritten.current !== null && lastWritten.current === props.value) return;
+    lastWritten.current = props.value;
+    dispatch({ kind: 'set-column', column: props.column, existingValue: props.value });
+  }, [props.column, props.value]);
 
   function setDraft(partial: Partial<Clause>): void {
     dispatch({ kind: 'set-draft', partial });
@@ -3156,11 +3287,12 @@ function UnifiedConditionBuilder(props: {
 
   function doInsert(): void {
     if (!state.column || !isInsertReady(state)) return;
-    // Write the serialized chain to row.extras[column], replacing whatever's
-    // there. Different from today's append-on-insert: chaining now produces
-    // the FULL expression, so we own the column's value end-to-end.
+    // Write the serialized chain to the cell, replacing whatever's there:
+    // chaining produces the FULL expression, so we own the column's value
+    // end-to-end. Every write goes through serializeAnyParsed.
     const out = serializeBuilderState(state);
-    props.setColumn(state.column, out);
+    lastWritten.current = out;
+    props.onChange(out);
     // Reset the session by re-hydrating against the just-written value.
     dispatch({ kind: 'set-column', column: state.column, existingValue: out });
   }
@@ -3217,7 +3349,7 @@ function UnifiedConditionBuilder(props: {
   // written stays the choice name.
   const choiceLabel = (field: string, value: string): string =>
     props.fieldChoiceOptions?.[field]?.find((c) => c.name === value)?.label ?? value;
-  const prose = (c: Clause): string => clauseToProse(c, choiceLabel);
+  const prose = (c: Clause): string => clauseToProse(c, choiceLabel, fieldLabel);
 
   // T9c — value cell mode: a typed literal, or another question picked
   // from the same field picker. A `${…}` draft value (e.g. after a
@@ -3246,11 +3378,10 @@ function UnifiedConditionBuilder(props: {
     ];
   })();
 
-  // "Stacked" iff the FLAT chain has reached the chip threshold. Plan §4:
-  // "the stacked-clause/chip UI only appears once a second clause exists."
-  // In grouped mode the card stack always renders.
+  // T9f (#19): the readback renders from the FIRST committed clause (plan §4
+  // showed chips only from the second one, which left a single reopened
+  // clause invisible). In grouped mode the card stack always renders.
   const draftEmpty = isDraftEmpty(state.draft);
-  const stacked = state.clauses.length >= 2 || (state.clauses.length >= 1 && !draftEmpty);
 
   const proseChips = state.clauses.map(prose);
   const draftProse = isDraftComplete(state.draft) ? prose(state.draft) : '…';
@@ -3271,7 +3402,7 @@ function UnifiedConditionBuilder(props: {
     state.groups.filter((g) => g.clauses.length > 0).length <= 1;
 
   return (
-    <div className="cond-strip cond-strip-unified">
+    <div className="cond-strip cond-strip-unified" data-column={props.column}>
       {state.rawFallback !== null && (
         <div
           className="muted"
@@ -3296,7 +3427,7 @@ function UnifiedConditionBuilder(props: {
           style={{ width: '100%' }}
         >
           <div className="muted ref-chips-hint" style={{ marginBottom: 4 }}>
-            This row shows when:
+            {COLUMN_LEAD[props.column].readback}
           </div>
           {state.groups.map((sg, gi) => (
             <Fragment key={gi}>
@@ -3417,10 +3548,10 @@ function UnifiedConditionBuilder(props: {
       )}
 
       {/* Flat-mode chip row — only when not grouped. */}
-      {state.groups === null && stacked && state.rawFallback === null && (
+      {state.groups === null && (state.clauses.length >= 1 || !draftEmpty) && state.rawFallback === null && (
         <div style={{ width: '100%' }}>
           <div className="muted ref-chips-hint" style={{ marginBottom: 4 }}>
-            This row shows when:{' '}
+            {COLUMN_LEAD[props.column].readback}{' '}
             {state.clauses.map((_, i) => (
               <span key={i}>
                 {i > 0 && (
@@ -3473,20 +3604,13 @@ function UnifiedConditionBuilder(props: {
         </div>
       )}
 
-      <span className="muted ref-chips-hint">build:</span>
-      <select
-        className="ref-chip-select"
-        value={state.column}
-        onChange={(e) => onPickColumn(e.target.value as ConditionColumn | '')}
-        title="Which column to add the fragment to"
-      >
-        <option value="">— column —</option>
-        {COLUMN_OPTIONS.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-      </select>
+      {/* T9f (#19): the sentence lead-in. The column is implied. */}
+      <span className="cond-lead">
+        {COLUMN_LEAD[props.column].lead}
+        <code className="raw-col-tag" title={`Raw XLSForm column: ${props.column}`}>
+          {props.column}
+        </code>
+      </span>
       {/* T9c (#16): the shared searchable picker — label + name, grouped by
           section, technical rows behind a toggle. The op-typicality from
           plan v0.3 survives as ordering inside each section; nothing is
@@ -3651,13 +3775,9 @@ function UnifiedConditionBuilder(props: {
           doInsert();
         }}
         disabled={!isInsertReady(state)}
-        title={
-          state.column
-            ? `Write the full chain to ${state.column}`
-            : 'Pick a column first'
-        }
+        title={`Write this rule to ${props.column}`}
       >
-        + insert
+        Apply
       </button>
       <button
         type="button"
@@ -3689,6 +3809,19 @@ function UnifiedConditionBuilder(props: {
           ↶ undo last clause
         </button>
       )}
+      {/* T9f — the XPath is available, not in the way. */}
+      <button
+        type="button"
+        className="link small cond-code-toggle"
+        onClick={(e) => {
+          e.preventDefault();
+          props.onToggleCode();
+        }}
+        aria-pressed={props.showCode}
+        title={props.showCode ? 'Hide the XPath for this rule' : 'Show and edit the XPath for this rule'}
+      >
+        {props.showCode ? 'hide code' : 'code'}
+      </button>
     </div>
   );
 }

@@ -39,9 +39,8 @@ async function openPregnancy(page: Page): Promise<void> {
 
 async function openStrip(row: Locator, column: 'relevant' | 'constraint'): Promise<Locator> {
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator(`.cond-strip-unified[data-column="${column}"]`);
   await expect(strip).toBeVisible();
-  await strip.locator('.ref-chip-select').nth(0).selectOption(column);
   return strip;
 }
 
@@ -79,7 +78,7 @@ test('T9c — search narrows by label or name on the first keystrokes; technical
   await openPregnancy(page);
   const strip = await openStrip(rowByType(page, /^integer$/), 'relevant');
   const search = strip.getByLabel('Search fields');
-  const fieldSelect = strip.locator('.ref-chip-select').nth(1);
+  const fieldSelect = strip.locator('.ref-chip-select').nth(0);
 
   // Options read "Label (name)".
   const texts = await optionTexts(fieldSelect);
@@ -121,8 +120,8 @@ test('T9c — choice values show labels in the value picker and the readback; th
   const row = rowByType(page, /^integer$/);
   const strip = await openStrip(row, 'relevant');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(1).selectOption('danger_signs');
-  await dropdowns.nth(2).selectOption('selected');
+  await dropdowns.nth(0).selectOption('danger_signs');
+  await dropdowns.nth(1).selectOption('selected');
 
   const valueSelect = strip.locator('select[title="Pick a value from this field\'s choices"]');
   const texts = await optionTexts(valueSelect);
@@ -132,10 +131,11 @@ test('T9c — choice values show labels in the value picker and the readback; th
 
   // Stage it and start a second clause so the readback chips render.
   await strip.getByRole('button', { name: '+ add another rule' }).click();
-  await dropdowns.nth(1).selectOption('lmp_date');
-  await dropdowns.nth(2).selectOption('ref');
-  await expect(strip.locator('.cond-preview').first()).toHaveText('danger_signs includes Vaginal bleeding');
-  await strip.getByRole('button', { name: '+ insert' }).click();
+  await dropdowns.nth(0).selectOption('lmp_date');
+  await dropdowns.nth(1).selectOption('ref');
+  // T9f: readback uses the question's label and the choice's label.
+  await expect(strip.locator('.cond-preview').first()).toHaveText('Danger signs includes Vaginal bleeding');
+  await strip.getByRole('button', { name: 'Apply', exact: true }).click();
   // Bytes: the choice NAME, exactly what the builder wrote before T9c.
   await expect(rawColumnInput(row, 'relevant')).toHaveValue(
     "selected(${danger_signs}, 'vaginal_bleeding') and ${lmp_date}",
@@ -147,8 +147,8 @@ test('T9c — the value cell can pick another question instead of typing `${…}
   const row = rowByType(page, /^integer$/);
   const strip = await openStrip(row, 'relevant');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(1).selectOption('lmp_date');
-  await dropdowns.nth(2).selectOption('=');
+  await dropdowns.nth(0).selectOption('lmp_date');
+  await dropdowns.nth(1).selectOption('=');
   // The free-text cell no longer invites `${other_field}`.
   await expect(strip.locator('input.cond-value-input')).toHaveAttribute('placeholder', 'value');
 
@@ -163,7 +163,7 @@ test('T9c — the value cell can pick another question instead of typing `${…}
   await expect(valuePicker).toHaveValue('patient_id');
   await expect(strip.getByLabel('Search fields').nth(1)).toHaveValue('');
   await expect(valuePicker).not.toHaveAttribute('size', /\d+/);
-  const insert = strip.getByRole('button', { name: '+ insert' });
+  const insert = strip.getByRole('button', { name: 'Apply', exact: true });
   await expect(insert).toBeEnabled();
   await insert.click();
   await expect(strip.getByRole('button', { name: '↶ undo last clause' })).toBeVisible();
@@ -179,6 +179,11 @@ test('T9c — the "✎ build" modal uses the same picker, and its output is unch
   const relevantField = row
     .locator('label.expr-field')
     .filter({ has: page.locator('code.raw-col-tag', { hasText: /^relevant$/ }) });
+  // T9f: the XPath box and the advanced modal sit behind the strip's "code" toggle.
+  await row
+    .locator('.cond-strip-unified[data-column="relevant"]')
+    .getByRole('button', { name: 'code', exact: true })
+    .click();
   await relevantField.locator('button', { hasText: '✎ build' }).click();
   const modal = page.locator('.rule-builder-modal');
   await expect(modal).toBeVisible();
@@ -212,7 +217,7 @@ test('T9c — on a real 280-row form "lmp" lists a handful of fields, grouped by
     const row = rowByType(page, /^integer$/).last();
     await row.scrollIntoViewIfNeeded();
     const strip = await openStrip(row, 'relevant');
-    const fieldSelect = strip.locator('.ref-chip-select').nth(1);
+    const fieldSelect = strip.locator('.ref-chip-select').nth(0);
     const all = await optionValues(fieldSelect);
     // Earlier, uniquely-named, non-technical fields only — still dozens.
     expect(all.length).toBeGreaterThan(20);

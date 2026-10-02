@@ -51,9 +51,8 @@ async function saveForm(page: Page): Promise<void> {
 /** Open the row's advanced panel and point the unified strip at `column`. */
 async function openStrip(row: Locator, column: 'relevant' | 'constraint'): Promise<Locator> {
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator(`.cond-strip-unified[data-column="${column}"]`);
   await expect(strip).toBeVisible();
-  await strip.locator('.ref-chip-select').nth(0).selectOption(column);
   return strip;
 }
 
@@ -69,8 +68,8 @@ function rawColumnInput(row: Locator, column: string): Locator {
 async function expectOpenAsClause(strip: Locator): Promise<void> {
   await expect(strip.getByText(/This rule was hand-written/)).toHaveCount(0);
   await expect(strip.getByRole('button', { name: '↶ undo last clause' })).toBeVisible();
-  await expect(strip.getByRole('button', { name: '+ insert' })).toBeEnabled();
-  await expect(strip.locator('.ref-chip-select').nth(1)).toBeEnabled();
+  await expect(strip.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
+  await expect(strip.locator('.ref-chip-select').nth(0)).toBeEnabled();
 }
 
 test('T9b — "has an answer" and "is not selected" written by the strip reopen as clauses with controls enabled', async ({
@@ -86,9 +85,9 @@ test('T9b — "has an answer" and "is not selected" written by the strip reopen 
     // gravidity (integer): relevant = "lmp_date has an answer" → `${lmp_date}`.
     const gravidity = rowByType(page, /^integer$/);
     let strip = await openStrip(gravidity, 'relevant');
-    await strip.locator('.ref-chip-select').nth(1).selectOption('lmp_date');
-    await strip.locator('.ref-chip-select').nth(2).selectOption('ref');
-    await strip.getByRole('button', { name: '+ insert' }).click();
+    await strip.locator('.ref-chip-select').nth(0).selectOption('lmp_date');
+    await strip.locator('.ref-chip-select').nth(1).selectOption('ref');
+    await strip.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(rawColumnInput(gravidity, 'relevant')).toHaveValue('${lmp_date}');
     // The strip re-hydrates from what it just wrote: a clause, not hand-written text.
     await expectOpenAsClause(strip);
@@ -96,9 +95,9 @@ test('T9b — "has an answer" and "is not selected" written by the strip reopen 
     // chair_rise (select_one): relevant = "danger_signs is not selected" → `not(${danger_signs})`.
     const chairRise = rowByType(page, /^select_one pass_fail$/);
     strip = await openStrip(chairRise, 'relevant');
-    await strip.locator('.ref-chip-select').nth(1).selectOption('danger_signs');
-    await strip.locator('.ref-chip-select').nth(2).selectOption('not');
-    await strip.getByRole('button', { name: '+ insert' }).click();
+    await strip.locator('.ref-chip-select').nth(0).selectOption('danger_signs');
+    await strip.locator('.ref-chip-select').nth(1).selectOption('not');
+    await strip.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(rawColumnInput(chairRise, 'relevant')).toHaveValue('not(${danger_signs})');
     await expectOpenAsClause(strip);
 
@@ -147,15 +146,15 @@ test("T9b — an existing `${f} != ''` relevant opens as a clause and saves back
 
     // Re-insert with zero edits: the clause is written back as it was
     // spelled, never normalised to `${lmp_date}`.
-    await strip.getByRole('button', { name: '+ insert' }).click();
+    await strip.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(rawColumnInput(lmpNote, 'relevant')).toHaveValue("${lmp_date} != ''");
 
     // Dirty the form elsewhere so Save is reachable, then save.
     const gravidity = rowByType(page, /^integer$/);
     const gStrip = await openStrip(gravidity, 'relevant');
-    await gStrip.locator('.ref-chip-select').nth(1).selectOption('lmp_date');
-    await gStrip.locator('.ref-chip-select').nth(2).selectOption('ref');
-    await gStrip.getByRole('button', { name: '+ insert' }).click();
+    await gStrip.locator('.ref-chip-select').nth(0).selectOption('lmp_date');
+    await gStrip.locator('.ref-chip-select').nth(1).selectOption('ref');
+    await gStrip.getByRole('button', { name: 'Apply', exact: true }).click();
     await saveForm(page);
 
     const after = (await (await request.get(`${API}/api/forms/app:pregnancy`)).json()) as {

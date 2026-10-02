@@ -36,6 +36,11 @@ test('§1 relevant builder — selected() value is a dropdown of the field’s r
   await gravidityRow.getByRole('button', { name: /show advanced/ }).click();
 
   // Open the RelevantRuleBuilder via the relevant ExpressionField's build button.
+  // T9f (#19): the XPath box (and its "✎ build") sits behind the strip's "code" toggle.
+  const codeBtn = gravidityRow
+    .locator('.cond-strip-unified[data-column="relevant"]')
+    .getByRole('button', { name: 'code', exact: true });
+  if (await codeBtn.isVisible().catch(() => false)) await codeBtn.click();
   await gravidityRow
     .locator('.expr-field', { hasText: 'Show this question when' })
     .locator('button', { hasText: '✎ build' })

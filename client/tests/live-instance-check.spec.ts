@@ -149,13 +149,12 @@ test('T9g — a relevance and a constraint authored by picking match at runtime 
     await lmp.getByRole('checkbox', { name: 'required' }).uncheck();
     const gravidity = rowByType(page, /^integer$/);
     await gravidity.getByRole('button', { name: /show advanced/ }).click();
-    const strip = gravidity.locator('.cond-strip-unified');
+    const strip = gravidity.locator('.cond-strip-unified[data-column="relevant"]');
     const dd = strip.locator('.ref-chip-select');
-    await dd.nth(0).selectOption('relevant');
-    await dd.nth(1).selectOption('chair_rise');
-    await dd.nth(2).selectOption('selected');
+    await dd.nth(0).selectOption('chair_rise');
+    await dd.nth(1).selectOption('selected');
     await strip.locator('select[title="Pick a value from this field\'s choices"]').selectOption('pass');
-    await strip.getByRole('button', { name: '+ insert' }).click();
+    await strip.getByRole('button', { name: 'Apply', exact: true }).click();
     const panel = gravidity.getByTestId('validation-panel');
     await panel.getByRole('combobox', { name: 'Add a validation rule' }).selectOption({ label: 'Between two values' });
     await panel.getByRole('spinbutton', { name: 'Minimum' }).fill('0');

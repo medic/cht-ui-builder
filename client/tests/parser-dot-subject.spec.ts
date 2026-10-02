@@ -95,16 +95,15 @@ test('T9a — `.` constraints and `../field` relevants survive open-and-save byt
     // (3) A `../field` relevant opens in the inline strip as a clause.
     const lmpNote = rowByType(page, /^note$/);
     await lmpNote.getByRole('button', { name: /show advanced/ }).click();
-    const strip = lmpNote.locator('.cond-strip-unified');
-    await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
+    const strip = lmpNote.locator('.cond-strip-unified[data-column="relevant"]');
     // A committed clause shows as the `↶ undo last clause` control plus an
     // enabled `+ insert`; a hand-written rule shows the status line and
     // disables both.
     await expect(strip.getByText(/This rule was hand-written/)).toHaveCount(0);
     await expect(strip.getByRole('button', { name: '↶ undo last clause' })).toBeVisible();
-    await expect(strip.getByRole('button', { name: '+ insert' })).toBeEnabled();
+    await expect(strip.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
     // Re-inserting with zero edits writes the ../ spelling back, not ${}.
-    await strip.getByRole('button', { name: '+ insert' }).click();
+    await strip.getByRole('button', { name: 'Apply', exact: true }).click();
     const relevantField = lmpNote
       .locator('label.expr-field')
       .filter({ has: page.locator('code.raw-col-tag', { hasText: /^relevant$/ }) });

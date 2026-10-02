@@ -24,7 +24,9 @@ export default defineConfig({
   testDir: './tests',
   // The hosted-mode acceptance needs its own server (CHT_UI_MODE=hosted,
   // throwaway DATA_ROOT) — see playwright.hosted.config.ts.
-  testIgnore: /hosted-authoring\.spec\.ts$/,
+  // The T9 feature demos record videos under their own config
+  // (playwright.demo.config.ts); they are not part of the suite.
+  testIgnore: [/hosted-authoring\.spec\.ts$/, /t9-demos[\/]/],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
