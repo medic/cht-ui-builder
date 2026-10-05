@@ -14,10 +14,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  * serve the built client itself (SERVE_CLIENT=1) — the exact shape the
  * Dockerfile ships. Requires `pnpm build` (shared, server AND client) first.
  *
+ * Sign-in goes to scripts/fake-cht.mjs, started alongside as the CHT instance.
+ *
  *   pnpm --filter @cht-ui/client exec playwright test -c playwright.hosted.config.ts
  */
 const dataRoot = mkdtempSync(path.join(os.tmpdir(), 'cht-ui-hosted-e2e-'));
 const port = 5194;
+// scripts/fake-cht.mjs: what hosted sign-in logs in against.
+const chtPort = 5995;
 
 export default defineConfig({
   testDir: './tests',
@@ -27,21 +31,30 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
-  webServer: {
-    command: 'node server/dist/index.js',
-    cwd: repoRoot,
-    url: `http://127.0.0.1:${port}/api/health`,
-    reuseExistingServer: false,
-    timeout: 60_000,
-    env: {
-      CHT_UI_MODE: 'hosted',
-      DATA_ROOT: dataRoot,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      SERVE_CLIENT: '1',
-      LOG_LEVEL: 'warn',
+  webServer: [
+    {
+      command: `node scripts/fake-cht.mjs ${chtPort}`,
+      cwd: repoRoot,
+      port: chtPort,
+      reuseExistingServer: false,
     },
-  },
+    {
+      command: 'node server/dist/index.js',
+      cwd: repoRoot,
+      url: `http://127.0.0.1:${port}/api/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: {
+        CHT_UI_MODE: 'hosted',
+        DATA_ROOT: dataRoot,
+        PORT: String(port),
+        HOST: '127.0.0.1',
+        SERVE_CLIENT: '1',
+        LOG_LEVEL: 'warn',
+        CHT_INSTANCES: `http://127.0.0.1:${chtPort}`,
+      },
+    },
+  ],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     actionTimeout: 5_000,

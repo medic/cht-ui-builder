@@ -221,7 +221,8 @@ Wraps the bundled `cht-conf` CLI.
 
 ## Hosted mode: build a CHT app with nothing installed
 
-The same server runs as a multi-user web app: sign up, start blank or from a
+The same server runs as a multi-user web app: sign in with your CHT
+credentials (as in cht-user-management), start blank or from a
 template, import a config from a git URL or a zip, edit it, run the real
 cht-conf compile / convert / validate, and download a deployable project (or
 push a branch back). No git, node, python or cht-conf on the user's machine.

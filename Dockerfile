@@ -14,7 +14,11 @@
 # image itself holds no project state.
 #
 #   docker build -t cht-ui-builder .
-#   docker run -p 5174:5174 -v cht-ui-data:/data cht-ui-builder
+#   docker run -p 5174:5174 -v cht-ui-data:/data \
+#     -e CHT_INSTANCES=https://my-cht.dev.medicmobile.org cht-ui-builder
+#
+# CHT_INSTANCES is required: people sign in with their CHT credentials against
+# one of those instances, and the server will not start without it.
 #
 # Prove the toolchain (what §8.1 asks for before any code is touched):
 #   docker run --rm cht-ui-builder node scripts/validate-generated-forms.mjs

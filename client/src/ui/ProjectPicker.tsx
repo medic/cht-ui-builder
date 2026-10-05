@@ -112,7 +112,8 @@ export function ProjectPicker() {
           </div>
           {hosted && sess?.user && (
             <div className="picker-user muted small">
-              {sess.user.email}
+              {sess.user.name}
+              {sess.user.instance && <> on {sess.user.instance}</>}
               <button type="button" className="link" onClick={() => void signOut()}>
                 Sign out
               </button>

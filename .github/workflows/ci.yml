@@ -191,15 +191,16 @@ jobs:
         run: pnpm --filter @cht-ui/client exec playwright test condition-builder.spec.ts form-editing.spec.ts fhir-mapping.spec.ts form-data-passing.spec.ts quick-hierarchy.spec.ts contact-form-tile-classification.spec.ts form-context-types.spec.ts hierarchy-ux-polish.spec.ts poc-build.spec.ts anc-build-deploy.spec.ts geriatric-blockers.spec.ts pick-preexisting-values.spec.ts
 
       # Hosted, multi-user authoring at the browser level (docs/plans/
-      # hosted-authoring.md §12): sign up, start blank, land in the project;
-      # two tabs hold two projects; another user sees nothing; sign out.
+      # hosted-authoring.md §12): sign in with CHT credentials (against
+      # scripts/fake-cht.mjs, which the config starts), start blank, land in the
+      # project; two tabs hold two projects; another user sees nothing; sign out.
       # Its own config boots the server in CHT_UI_MODE=hosted against a
       # throwaway DATA_ROOT and serves the BUILT client from the same origin —
       # the exact shape the Dockerfile ships — so the client must be built.
       - name: Build client (served by the hosted server)
         run: pnpm --filter @cht-ui/client build
 
-      - name: Run hosted-mode e2e (sign-up, start blank, two tabs, isolation)
+      - name: Run hosted-mode e2e (CHT sign-in, start blank, two tabs, isolation)
         run: pnpm --filter @cht-ui/client exec playwright test -c playwright.hosted.config.ts
 
       - name: Upload Playwright report on failure

@@ -5,7 +5,7 @@
  * serves the built client from the same origin.
  *
  * What a person with nothing installed actually does:
- *   sign up → start blank → name it → land in the project → see how to take it
+ *   sign in with CHT credentials → start blank → name it → land in the project → see how to take it
  *   with them. Then the multi-user and multi-tab guarantees the plan makes:
  *   user B sees none of A's projects; two tabs of A hold two different projects.
  *
@@ -16,13 +16,13 @@ import { expect, test, type Page } from '@playwright/test';
 
 const run = Date.now().toString(36);
 
-async function signUp(page: Page, email: string) {
+/** Sign in as a CHT user on scripts/fake-cht.mjs (password is `<name>-pass`). */
+async function signIn(page: Page, username: string) {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-  await page.getByRole('button', { name: 'Create an account' }).click();
-  await page.locator('#signin-email').fill(email);
-  await page.locator('#signin-password').fill('correct-horse-battery');
-  await page.getByRole('button', { name: 'Create account' }).click();
+  await page.locator('#signin-username').fill(username);
+  await page.locator('#signin-password').fill(`${username}-pass`);
+  await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Your projects' })).toBeVisible();
 }
 
@@ -35,8 +35,10 @@ async function startBlank(page: Page, name: string) {
   await expect(page.locator('.sidebar .project-name')).toHaveText(name);
 }
 
-test('sign up, start blank, land in the project, see how to take it with you', async ({ page }) => {
-  await signUp(page, `a-${run}@example.org`);
+test('sign in with CHT credentials, start blank, land in the project, see how to take it with you', async ({
+  page,
+}) => {
+  await signIn(page, `po-a-${run}`);
   await expect(page.getByText('Nothing yet.')).toBeVisible();
 
   await startBlank(page, 'Flood response 2026');
@@ -61,7 +63,7 @@ test('sign up, start blank, land in the project, see how to take it with you', a
 });
 
 test('two tabs hold two different projects', async ({ page, context }) => {
-  await signUp(page, `t-${run}@example.org`);
+  await signIn(page, `po-t-${run}`);
   await startBlank(page, 'First');
 
   const tab2 = await context.newPage();
@@ -84,12 +86,12 @@ test('two tabs hold two different projects', async ({ page, context }) => {
 test('another user sees none of it', async ({ browser }) => {
   const a = await browser.newContext();
   const pa = await a.newPage();
-  await signUp(pa, `iso-a-${run}@example.org`);
+  await signIn(pa, `po-iso-a-${run}`);
   await startBlank(pa, 'Private to A');
 
   const b = await browser.newContext();
   const pb = await b.newPage();
-  await signUp(pb, `iso-b-${run}@example.org`);
+  await signIn(pb, `po-iso-b-${run}`);
   await expect(pb.getByText('Nothing yet.')).toBeVisible();
   await expect(pb.getByText('Private to A')).toHaveCount(0);
 
@@ -98,9 +100,18 @@ test('another user sees none of it', async ({ browser }) => {
 });
 
 test('sign out returns to sign-in and forgets the tab', async ({ page }) => {
-  await signUp(page, `s-${run}@example.org`);
+  await signIn(page, `po-s-${run}`);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   await page.reload();
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+});
+
+test('a CHT user without the required permission is refused, and told why', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#signin-username').fill('chw');
+  await page.locator('#signin-password').fill('chw-pass');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.locator('.error-banner')).toContainText('can_configure');
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });
