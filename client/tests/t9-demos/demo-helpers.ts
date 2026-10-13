@@ -18,7 +18,8 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_DIR = path.resolve(here, '..', 'fixtures', 'mini-config');
 export const API = 'http://127.0.0.1:5174';
-export const DEMO_DIR = path.resolve(here, '..', '..', 'demo', 't9');
+/** Output folder under client/demo; `DEMO_OUT=<name>` records elsewhere than t9. */
+export const DEMO_DIR = path.resolve(here, '..', '..', 'demo', process.env.DEMO_OUT ?? 't9');
 
 export type SurveyRow = {
   name?: string;
@@ -93,7 +94,7 @@ export const test = base.extend<{ scratch: string }>({
     if (video) {
       await fs.mkdir(DEMO_DIR, { recursive: true });
       // The replay notes live beside the specs and beside the videos.
-      await fs.copyFile(path.join(here, 'README.md'), path.join(DEMO_DIR, 'README.md'));
+      if (!process.env.DEMO_OUT) await fs.copyFile(path.join(here, 'README.md'), path.join(DEMO_DIR, 'README.md'));
       const ticket = path.basename(testInfo.file).replace(/\.demo\.spec\.ts$/, '');
       const dest = path.join(DEMO_DIR, `${ticket}.webm`);
       await video.saveAs(dest);
