@@ -10,8 +10,14 @@ ready to drop into a cht-conf project's `forms/app/`.
 Re-record from `client/`:
 
 ```sh
-DEMO_OUT=cho-supervisory-form DEMO_MS=150 ./node_modules/.bin/playwright test -c playwright.demo.config.ts tests/t9-demos/cho_supervisory_form.demo.spec.ts
+DEMO_OUT=cho-supervisory-form DEMO_MS=0 ./node_modules/.bin/playwright test -c playwright.demo.config.ts tests/t9-demos/cho_supervisory_form.demo.spec.ts
 ```
+
+The recording is paced like a person: a visible cursor glides to each control
+and rings on every click, text is typed one character at a time, and there is
+a pause after every click, label and row. `DEMO_TYPE_MS` (ms per character,
+default 18) and `DEMO_PAUSE_MS` (pause after a click, default 350) tune it;
+`DEMO_MS` (slow-motion per action) stays 0 here because it would also slow every keystroke.
 
 ## What the video does, in order
 

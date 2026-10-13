@@ -77,8 +77,48 @@ export const test = base.extend<{ scratch: string }>({
           /* ignore */
         }
       };
+      // A visible cursor: headless recordings have none. It glides to the
+      // pointer position and rings on every mousedown.
+      const ensureCursor = () => {
+        // eslint-disable-next-line no-undef
+        const d = document;
+        if (d.getElementById('__demo-cursor') || !d.body) return;
+        const c = d.createElement('div');
+        c.id = '__demo-cursor';
+        c.style.cssText =
+          'position:fixed;left:0;top:0;width:22px;height:30px;z-index:2147483646;pointer-events:none;' +
+          'transition:transform .22s ease-out;transform:translate(-9999px,-9999px);' +
+          'filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))';
+        c.innerHTML =
+          '<svg viewBox="0 0 22 30" width="22" height="30"><path d="M2 2 L2 23 L7.5 18.5 L11 27 L15 25.3 L11.6 17 L19 17 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+        d.body.appendChild(c);
+        const ring = d.createElement('div');
+        ring.id = '__demo-ring';
+        ring.style.cssText =
+          'position:fixed;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;' +
+          'border:3px solid #e8562a;z-index:2147483645;pointer-events:none;opacity:0;' +
+          'transform:scale(.4)';
+        d.body.appendChild(ring);
+        d.addEventListener('mousemove', (e) => {
+          c.style.transform = 'translate(' + e.clientX + 'px,' + e.clientY + 'px)';
+        }, true);
+        d.addEventListener('mousedown', (e) => {
+          ring.style.transition = 'none';
+          ring.style.left = e.clientX + 'px';
+          ring.style.top = e.clientY + 'px';
+          ring.style.opacity = '1';
+          ring.style.transform = 'scale(.4)';
+          // eslint-disable-next-line no-undef
+          requestAnimationFrame(() => {
+            ring.style.transition = 'transform .45s ease-out, opacity .45s ease-out';
+            ring.style.transform = 'scale(1.6)';
+            ring.style.opacity = '0';
+          });
+        }, true);
+      };
       // eslint-disable-next-line no-undef
       document.addEventListener('DOMContentLoaded', () => {
+        ensureCursor();
         try {
           // eslint-disable-next-line no-undef
           const t = sessionStorage.getItem('__demoCaption');
@@ -235,4 +275,39 @@ export async function setOneClickTiles(page: Page, on: boolean): Promise<void> {
       /* storage unavailable */
     }
   }, String(on));
+}
+
+/* ---------------------- human-paced interaction helpers ---------------------- */
+
+/** Typing speed in ms per character; `DEMO_TYPE_MS` overrides (0 = paste). */
+const TYPE_MS = Number(process.env.DEMO_TYPE_MS ?? 22);
+/** Pause after a click, in ms; `DEMO_PAUSE_MS` overrides. */
+const PAUSE_MS = Number(process.env.DEMO_PAUSE_MS ?? 500);
+
+/** Move the cursor to it, click, and pause so the viewer sees where the click landed. */
+export async function hclick(target: Locator, pauseMs = PAUSE_MS): Promise<void> {
+  await target.scrollIntoViewIfNeeded();
+  await target.hover();
+  await target.page().waitForTimeout(160);
+  await target.click();
+  await target.page().waitForTimeout(pauseMs);
+}
+
+/** Click into a box and type the text one character at a time. */
+export async function htype(target: Locator, text: string, pauseMs = PAUSE_MS): Promise<void> {
+  await hclick(target, 120);
+  await target.fill('');
+  // No action timeout: a long Nepali label at human speed takes longer than 5 s.
+  if (TYPE_MS > 0) await target.pressSequentially(text, { delay: TYPE_MS, timeout: 0 });
+  else await target.fill(text);
+  await target.page().waitForTimeout(pauseMs);
+}
+
+/** Point at a dropdown, then choose; the native popup is not recorded, so the pause shows the result. */
+export async function hselect(target: Locator, value: string, pauseMs = PAUSE_MS): Promise<void> {
+  await target.scrollIntoViewIfNeeded();
+  await target.hover();
+  await target.page().waitForTimeout(160);
+  await target.selectOption(value);
+  await target.page().waitForTimeout(pauseMs);
 }
