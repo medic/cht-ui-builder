@@ -80,8 +80,11 @@ test('#3 A — dropdown lists real project types and emits contact.contact_type'
     // Pick `person` and confirm the preview shows the configurable form.
     await select.selectOption('person');
     const preview = page.locator('.context-builder .preview code');
-    await expect(preview).toContainText("contact.contact_type === 'person'");
-    await expect(preview).not.toContainText("contact.type === 'person'");
+    // `person` is one of the CHT's four classic ids, stored under `type` even
+    // when contact_types declares it; the configurable `contact_type` field
+    // is only right for custom ids (a runtime "not authorized" otherwise).
+    await expect(preview).toContainText("contact.type === 'person'");
+    await expect(preview).not.toContainText("contact.contact_type === 'person'");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

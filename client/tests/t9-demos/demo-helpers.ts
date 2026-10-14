@@ -304,7 +304,7 @@ export async function htype(target: Locator, text: string, pauseMs = PAUSE_MS): 
 }
 
 /** Point at a dropdown, then choose; the native popup is not recorded, so the pause shows the result. */
-export async function hselect(target: Locator, value: string, pauseMs = PAUSE_MS): Promise<void> {
+export async function hselect(target: Locator, value: string | { label: string }, pauseMs = PAUSE_MS): Promise<void> {
   await target.scrollIntoViewIfNeeded();
   await target.hover();
   await target.page().waitForTimeout(160);

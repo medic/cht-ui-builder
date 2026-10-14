@@ -55,6 +55,9 @@ interface Props {
   disabled?: boolean;
 }
 
+/** The CHT's hardcoded contact types: documents of these types carry `type`, not `contact_type`. */
+const LEGACY_TYPE_IDS = new Set(['district_hospital', 'health_center', 'clinic', 'person']);
+
 export function ContextExpressionBuilder({
   value,
   onChange,
@@ -101,7 +104,13 @@ export function ContextExpressionBuilder({
             contextPlace,
           );
           const first = filtered[0] ?? contactTypes[0]!;
-          r = { kind: 'contact_contact_type', value: first.id };
+          // The CHT stores the four classic ids under `type` even when
+          // contact_types declares them; only custom ids live under
+          // `contact_type`. Emitting the wrong field makes the CHT refuse
+          // the form ("not authorized") for every contact of that type.
+          r = LEGACY_TYPE_IDS.has(first.id)
+            ? { kind: 'contact_type', value: first.id }
+            : { kind: 'contact_contact_type', value: first.id };
         } else {
           r = { kind: 'contact_type', value: 'person' };
         }
@@ -141,7 +150,10 @@ export function ContextExpressionBuilder({
       default:
         return;
     }
-    patch({ ...parsed, rules: [...parsed.rules, r] });
+    // A bare `true` is the "always show" placeholder; the first real rule
+    // replaces it rather than producing `true && …`.
+    const base = parsed.rules.filter((x) => x.kind !== 'is_true');
+    patch({ ...parsed, rules: [...base, r] });
   }
 
   if (disabled) {

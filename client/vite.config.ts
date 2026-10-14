@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Demo recordings are written under client/demo while Vite runs; never watch them.
+    watch: { ignored: ['**/demo/**', '**/test-results/**'] },
     proxy: {
       '/api': 'http://localhost:5174',
     },
