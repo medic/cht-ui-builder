@@ -1,0 +1,39 @@
+/* T9f (#19) — sentence-shaped rule editors and the regrouped advanced panel */
+.cond-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #111);
+  margin-right: 2px;
+}
+.cond-lead .raw-col-tag {
+  font-weight: 400;
+}
+.cond-code-toggle {
+  margin-left: auto;
+}
+.advanced-section {
+  margin: 10px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 6px;
+}
+.advanced-section:first-child {
+  border-top: 0;
+  margin-top: 0;
+}
+/* Label grid: keep the locale tag and its "+ insert" on one line so a
+   seven-locale row never lets captions collide. */
+.label-row {
+  flex-wrap: wrap;
+}
+.label-row .locale-tag,
+.label-row .label-insert-ref {
+  white-space: nowrap;
+}

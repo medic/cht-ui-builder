@@ -48,15 +48,14 @@ test('condition builder — value cell is a populated dropdown for contact-injec
   await lmpRow.getByRole('button', { name: /show advanced/ }).click();
 
   // The build strip lives inside the row's advanced panel.
-  const strip = lmpRow.locator('.cond-strip-unified');
+  const strip = lmpRow.locator('.cond-strip-unified[data-column="relevant"]');
   await expect(strip).toBeVisible();
 
   // Strip is [column ▼] [field ▼] [logic ▼] [value …]. The first three
   // are `.ref-chip-select` in DOM order.
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
-  await dropdowns.nth(1).selectOption('patient_sex');
-  await dropdowns.nth(2).selectOption('='); // comparison op → needs a value
+  await dropdowns.nth(0).selectOption('patient_sex');
+  await dropdowns.nth(1).selectOption('='); // comparison op → needs a value
 
   // The PR's deliverable: the value cell is a populated <select>,
   // not the free-text `<input class="cond-value-input">` fallback.
@@ -91,14 +90,13 @@ test('condition builder — fields without any choices source still show free-te
     .filter({ has: page.locator('code.type-chip-raw', { hasText: /^date$/ }) });
   await lmpRow.getByRole('button', { name: /show advanced/ }).click();
 
-  const strip = lmpRow.locator('.cond-strip-unified');
+  const strip = lmpRow.locator('.cond-strip-unified[data-column="relevant"]');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
   // `patient_id` harvests `../inputs/contact/_id` — earlier in the survey
   // than `lmp_date`, and no contact form declares `_id` as a select, so it
   // resolves to no choices and the value cell falls back to free text.
-  await dropdowns.nth(1).selectOption('patient_id');
-  await dropdowns.nth(2).selectOption('=');
+  await dropdowns.nth(0).selectOption('patient_id');
+  await dropdowns.nth(1).selectOption('=');
 
   await expect(strip.locator('input.cond-value-input')).toBeVisible();
   await expect(
@@ -125,8 +123,8 @@ async function buildClause(
   value: string,
 ): Promise<void> {
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(1).selectOption(field);
-  await dropdowns.nth(2).selectOption(op);
+  await dropdowns.nth(0).selectOption(field);
+  await dropdowns.nth(1).selectOption(op);
   // Use the free-text input when the field has no choices (the case for
   // `patient_id`, which harvests `_id` — no contact form declares it as a
   // select, so there is nothing to populate a dropdown from).
@@ -151,11 +149,10 @@ test('condition builder — group happy path: build flat AND, group, add OR-join
     .filter({ has: page.locator('code.type-chip-raw', { hasText: /^date$/ }) });
   await lmpRow.getByRole('button', { name: /show advanced/ }).click();
 
-  const strip = lmpRow.locator('.cond-strip-unified');
+  const strip = lmpRow.locator('.cond-strip-unified[data-column="relevant"]');
   await expect(strip).toBeVisible();
 
   // Pick column: relevant.
-  await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
 
   // Build clause 1: ${patient_sex} = 'female' (choices arrive from the
   // contact form, via the harvest calculate's `../inputs/contact/sex`).
@@ -194,7 +191,7 @@ test('condition builder — group happy path: build flat AND, group, add OR-join
   // reducer immediately rehydrates from the just-written value
   // (`set-column` action with the new existingValue), so the card stack
   // must re-rehydrate from a real parseRelevantGrouped round-trip.
-  await strip.getByRole('button', { name: '+ insert' }).click();
+  await strip.getByRole('button', { name: 'Apply', exact: true }).click();
 
   // Two cards still visible after rehydrate (this is the actual proof —
   // the chain made it through serializeAnyParsed → parseRelevantGrouped).
@@ -227,8 +224,7 @@ test('condition builder — no UI sequence can write a flat-mixed value (§3.7 s
     .filter({ has: page.locator('code.type-chip-raw', { hasText: /^date$/ }) });
   await lmpRow.getByRole('button', { name: /show advanced/ }).click();
 
-  const strip = lmpRow.locator('.cond-strip-unified');
-  await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
+  const strip = lmpRow.locator('.cond-strip-unified[data-column="relevant"]');
 
   // Build clause 1 (AND-default).
   await buildClause(strip, 'patient_sex', '=', 'female');
@@ -252,7 +248,7 @@ test('condition builder — no UI sequence can write a flat-mixed value (§3.7 s
   // + insert; assert the resulting raw `relevant` value DOES NOT carry
   // top-level mixed AND/OR (the only way to mix is via grouped form,
   // which this sequence didn't take).
-  await strip.getByRole('button', { name: '+ insert' }).click();
+  await strip.getByRole('button', { name: 'Apply', exact: true }).click();
   const relevantField = lmpRow.locator('.expr-field', {
     hasText: 'Show this question when…',
   });
@@ -283,6 +279,15 @@ function gravidityRow(page: import('@playwright/test').Page) {
     .filter({ has: page.locator('code.type-chip-raw', { hasText: /^integer$/ }) });
 }
 
+/** Non-empty option values of a <select>, in DOM order (optgroups flattened). */
+async function optionValues(sel: Locator): Promise<string[]> {
+  return await sel.evaluate((el) =>
+    Array.from((el as { options: ArrayLike<{ value: string }> }).options)
+      .map((o) => o.value)
+      .filter((v) => v.length > 0),
+  );
+}
+
 /** Read option text values from a <select>, grouped by their <optgroup> label. */
 async function optgroupSnapshot(sel: Locator): Promise<Record<string, string[]>> {
   return await sel.evaluate((el) => {
@@ -295,7 +300,7 @@ async function optgroupSnapshot(sel: Locator): Promise<Record<string, string[]>>
   });
 }
 
-test('v0.3 — op-first filtering: picking `is more than` groups date/numeric typical, text+choice atypical, still selectable', async ({
+test('v0.3 → T9c — op-typicality orders fields but never withholds one: `>` lists date/numeric first, choice fields still selectable', async ({
   page,
 }) => {
   await page.goto('/');
@@ -304,21 +309,23 @@ test('v0.3 — op-first filtering: picking `is more than` groups date/numeric ty
 
   const row = gravidityRow(page);
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator('.cond-strip-unified[data-column="relevant"]');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
   // Pick the natural-language label for `>` — option `value` is still `>`.
-  await dropdowns.nth(2).selectOption('>');
+  await dropdowns.nth(1).selectOption('>');
 
-  const fieldSelect = dropdowns.nth(1);
-  const snap = await optgroupSnapshot(fieldSelect);
-  // `lmp_date` (date) typical; `patient_id` (unknown) always-pass;
-  // `lmp_note` (text) atypical for ordering ops; choice fields
-  // (`patient_sex`, danger_signs) atypical too.
-  expect(snap['Typical for this check']).toContain('lmp_date');
-  expect(snap['Typical for this check']).toContain('patient_id');
-  expect(snap['Other fields']).toContain('lmp_note');
-  // Atypical field is STILL selectable (never hard-hidden).
+  const fieldSelect = dropdowns.nth(0);
+  const values = await optionValues(fieldSelect);
+  // Since T9c (#16) the picker groups by section (the fixture is flat, so
+  // one list) and uses op-typicality only to ORDER: date/numeric/unknown
+  // first, choice fields after — all present, none hidden by the op.
+  expect(values.indexOf('lmp_date')).toBeLessThan(values.indexOf('patient_sex'));
+  expect(values.indexOf('patient_id')).toBeLessThan(values.indexOf('danger_signs'));
+  expect(values).toContain('patient_sex');
+  expect(values).toContain('danger_signs');
+  // `lmp_note` is a note → technical → withheld until the toggle, not because of the op.
+  expect(values).not.toContain('lmp_note');
+  await strip.getByRole('checkbox', { name: 'show technical rows' }).check();
   await fieldSelect.selectOption('lmp_note');
   await expect(fieldSelect).toHaveValue('lmp_note');
 });
@@ -332,13 +339,12 @@ test('v0.3 — field-first ordering: picking date `lmp_date` groups comparison o
 
   const row = gravidityRow(page);
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator('.cond-strip-unified[data-column="relevant"]');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
   // Pick a date field FIRST so the op picker partitions field-first.
-  await dropdowns.nth(1).selectOption('lmp_date');
+  await dropdowns.nth(0).selectOption('lmp_date');
 
-  const opSelect = dropdowns.nth(2);
+  const opSelect = dropdowns.nth(1);
   const snap = await optgroupSnapshot(opSelect);
   // All 11 op values must appear somewhere in the DOM (no hiding).
   const all = ([] as string[]).concat(...Object.values(snap));
@@ -352,7 +358,7 @@ test('v0.3 — field-first ordering: picking date `lmp_date` groups comparison o
   expect(snap['Common operators']).toContain('<=');
 });
 
-test('v0.3 — Show all fields toggle flattens the field list (escape hatch)', async ({
+test('v0.3 → T9c — "show technical rows" is the only toggle: notes are withheld until it is on, and the op never hides a field', async ({
   page,
 }) => {
   await page.goto('/');
@@ -361,21 +367,25 @@ test('v0.3 — Show all fields toggle flattens the field list (escape hatch)', a
 
   const row = gravidityRow(page);
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator('.cond-strip-unified[data-column="relevant"]');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
-  await dropdowns.nth(2).selectOption('>');
+  await dropdowns.nth(1).selectOption('>');
 
-  const fieldSelect = dropdowns.nth(1);
-  const beforeSnap = await optgroupSnapshot(fieldSelect);
-  expect(Object.keys(beforeSnap).length).toBeGreaterThanOrEqual(2);
+  const fieldSelect = dropdowns.nth(0);
+  // The v0.3 "Show all fields" checkbox is gone (UX review finding 2: it
+  // read as unchecked while everything was shown).
+  await expect(strip.getByRole('checkbox', { name: 'Show all fields' })).toHaveCount(0);
+  const before = await optionValues(fieldSelect);
+  expect(before).not.toContain('lmp_note');
+  // Every non-technical field is offered regardless of the op.
+  for (const n of ['patient_sex', 'patient_id', 'lmp_date', 'danger_signs']) {
+    expect(before).toContain(n);
+  }
 
-  // Toggle on — the persistent "Show all fields" label/checkbox.
-  await strip.getByRole('checkbox', { name: 'Show all fields' }).check();
-
-  // Now flat list (no optgroups).
-  const afterSnap = await optgroupSnapshot(fieldSelect);
-  expect(Object.keys(afterSnap)).toHaveLength(0);
+  await strip.getByRole('checkbox', { name: 'show technical rows' }).check();
+  const after = await optionValues(fieldSelect);
+  expect(after).toContain('lmp_note');
+  expect(after.length).toBe(before.length + 1);
 });
 
 test('v0.3 — `includes` (selected) narrows field list to choice incl. contact-injected sex', async ({
@@ -387,20 +397,19 @@ test('v0.3 — `includes` (selected) narrows field list to choice incl. contact-
 
   const row = gravidityRow(page);
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator('.cond-strip-unified[data-column="relevant"]');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
   // `selected` is the canonical op value; its dropdown label is `includes value`.
-  await dropdowns.nth(2).selectOption('selected');
+  await dropdowns.nth(1).selectOption('selected');
 
-  const fieldSelect = dropdowns.nth(1);
-  const snap = await optgroupSnapshot(fieldSelect);
+  const fieldSelect = dropdowns.nth(0);
+  const values = await optionValues(fieldSelect);
   // `patient_sex` is choice-upgraded via fieldChoices — its calculation
-  // resolves through to the contact form's `sex` select.
-  expect(snap['Typical for this check']).toContain('patient_sex');
-  expect(snap['Typical for this check']).toContain('danger_signs');
-  // Non-choice rows (date, text) appear under "Other fields", still selectable.
-  expect(snap['Other fields']).toContain('lmp_date');
+  // resolves through to the contact form's `sex` select. Choice fields
+  // come first for `selected`; non-choice rows follow, still selectable.
+  expect(values.indexOf('patient_sex')).toBeLessThan(values.indexOf('lmp_date'));
+  expect(values.indexOf('danger_signs')).toBeLessThan(values.indexOf('lmp_date'));
+  expect(values).toContain('lmp_date');
 });
 
 test('v0.3 — unknown-kind field (`patient_id`) is always-pass: reachable under ordering op `>`', async ({
@@ -412,16 +421,16 @@ test('v0.3 — unknown-kind field (`patient_id`) is always-pass: reachable under
 
   const row = gravidityRow(page);
   await row.getByRole('button', { name: /show advanced/ }).click();
-  const strip = row.locator('.cond-strip-unified');
+  const strip = row.locator('.cond-strip-unified[data-column="relevant"]');
   const dropdowns = strip.locator('.ref-chip-select');
-  await dropdowns.nth(0).selectOption('relevant');
-  await dropdowns.nth(2).selectOption('>');
+  await dropdowns.nth(1).selectOption('>');
 
-  const fieldSelect = dropdowns.nth(1);
-  const snap = await optgroupSnapshot(fieldSelect);
+  const fieldSelect = dropdowns.nth(0);
+  const values = await optionValues(fieldSelect);
   // `patient_id` is a `calculate` whose harvested field has no choices →
-  // unknown kind → always-pass.
-  expect(snap['Typical for this check']).toContain('patient_id');
+  // unknown kind → always-pass: listed with the typical fields, before choices.
+  expect(values).toContain('patient_id');
+  expect(values.indexOf('patient_id')).toBeLessThan(values.indexOf('danger_signs'));
 });
 
 test('v0.3 — relabeled op dropdown saves byte-identical canonical XPath (no label leakage)', async ({
@@ -436,12 +445,11 @@ test('v0.3 — relabeled op dropdown saves byte-identical canonical XPath (no la
     .locator('.survey-row')
     .filter({ has: page.locator('code.type-chip-raw', { hasText: /^date$/ }) });
   await lmpRow.getByRole('button', { name: /show advanced/ }).click();
-  const strip = lmpRow.locator('.cond-strip-unified');
-  await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
+  const strip = lmpRow.locator('.cond-strip-unified[data-column="relevant"]');
 
   // Build `${patient_sex} = 'female'` using the relabeled dropdown ("equals value").
   await buildClause(strip, 'patient_sex', '=', 'female');
-  await strip.getByRole('button', { name: '+ insert' }).click();
+  await strip.getByRole('button', { name: 'Apply', exact: true }).click();
 
   // The persisted raw XPath uses the canonical `=` token, not "equals".
   const relevantField = lmpRow.locator('.expr-field', {
@@ -509,11 +517,10 @@ test('punch-list B2 — × start over saves byte-identical row.extras[relevant] 
       .locator('.survey-row')
       .filter({ has: page.locator('code.type-chip-raw', { hasText: /^date$/ }) });
     await dateRow.getByRole('button', { name: /show advanced/ }).click();
-    const setupStrip = dateRow.locator('.cond-strip-unified');
+    const setupStrip = dateRow.locator('.cond-strip-unified[data-column="relevant"]');
     await expect(setupStrip).toBeVisible();
-    await setupStrip.locator('.ref-chip-select').nth(0).selectOption('relevant');
     await buildClause(setupStrip, 'patient_sex', '=', 'female');
-    await setupStrip.getByRole('button', { name: '+ insert' }).click();
+    await setupStrip.getByRole('button', { name: 'Apply', exact: true }).click();
 
     // Save the seeded relevant.
     await page.locator('.page-header').getByRole('button', { name: 'Save', exact: true }).click();
@@ -537,12 +544,11 @@ test('punch-list B2 — × start over saves byte-identical row.extras[relevant] 
       .locator('.survey-row')
       .filter({ has: page.locator('code.type-chip-raw', { hasText: /^date$/ }) });
     await reloadedDate.getByRole('button', { name: /show advanced/ }).click();
-    const strip = reloadedDate.locator('.cond-strip-unified');
+    const strip = reloadedDate.locator('.cond-strip-unified[data-column="relevant"]');
     await expect(strip).toBeVisible();
 
     // Picking the column rehydrates the existing single-clause into the
     // builder state — no write yet.
-    await strip.locator('.ref-chip-select').nth(0).selectOption('relevant');
 
     // Stage 2 new clauses WITHOUT clicking `+ insert`. Each `+ add another
     // rule` push updates reducer state only; the value column is also

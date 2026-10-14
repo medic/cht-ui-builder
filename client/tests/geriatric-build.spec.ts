@@ -407,6 +407,11 @@ test('geriatric-build 6 — note relevance "select = choice" picked from a dropd
   // Relevance via the rule builder.
   const noteRow = rowByName(page, 'memory_test_note');
   await noteRow.getByRole('button', { name: /show advanced/ }).click();
+  // T9f (#19): the XPath box (and its "✎ build") sits behind the strip's "code" toggle.
+  const codeBtn = noteRow
+    .locator('.cond-strip-unified[data-column="relevant"]')
+    .getByRole('button', { name: 'code', exact: true });
+  if (await codeBtn.isVisible().catch(() => false)) await codeBtn.click();
   await noteRow
     .locator('.expr-field', { hasText: 'Show this question when' })
     .locator('button', { hasText: '✎ build' })
@@ -418,7 +423,7 @@ test('geriatric-build 6 — note relevance "select = choice" picked from a dropd
   await rule.locator('select').first().selectOption(Q_NAME);
   // "string" makes the value a quoted literal — that is what unlocks the
   // choice dropdown for a select_one field.
-  const stringToggle = rule.locator('input[type="checkbox"]');
+  const stringToggle = rule.getByRole('checkbox', { name: 'string' });
   if (!(await stringToggle.isChecked())) await stringToggle.check();
 
   // §1 deliverable: the value cell is a populated dropdown, NOT a text input.
@@ -573,6 +578,11 @@ test('geriatric-build 9 — multi-field OR relevance (the referral-trigger shape
 
   const noteRow = rowByName(page, 'refer_note');
   await noteRow.getByRole('button', { name: /show advanced/ }).click();
+  // T9f (#19): the XPath box (and its "✎ build") sits behind the strip's "code" toggle.
+  const codeBtn = noteRow
+    .locator('.cond-strip-unified[data-column="relevant"]')
+    .getByRole('button', { name: 'code', exact: true });
+  if (await codeBtn.isVisible().catch(() => false)) await codeBtn.click();
   await noteRow
     .locator('.expr-field', { hasText: 'Show this question when' })
     .locator('button', { hasText: '✎ build' })
@@ -585,7 +595,8 @@ test('geriatric-build 9 — multi-field OR relevance (the referral-trigger shape
     await modal.getByRole('button', { name: '+ comparison' }).click();
     const rule = modal.locator('.rule-row').last();
     await rule.locator('select').first().selectOption(field);
-    const stringToggle = rule.locator('input[type="checkbox"]');
+    // T9c (#16): the rule row also carries the picker's "show technical rows" box.
+    const stringToggle = rule.getByRole('checkbox', { name: 'string' });
     if (!(await stringToggle.isChecked())) await stringToggle.check();
     const valueSelect = rule.locator('select.choice-value-select');
     await expect(valueSelect).toBeVisible();

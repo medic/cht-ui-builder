@@ -276,3 +276,18 @@ export function defaultInsertIndex(survey: SurveyRow[]): number {
   }
   return trailingStart === -1 ? survey.length : trailingStart;
 }
+
+/**
+ * T9d (#17) — the index where "+ Question" lands when the author is ON a
+ * row: directly after it. A `begin group` / `begin repeat` row counts as
+ * "inside the group" (its first child), so the pair stays balanced; any
+ * other row is followed by its new sibling, which keeps every enclosing
+ * pair balanced too. An unknown or absent `rowId` falls back to
+ * {@link defaultInsertIndex}, the before-the-trailing-plumbing position.
+ */
+export function insertIndexAfterRow(survey: SurveyRow[], rowId: string | null): number {
+  if (!rowId) return defaultInsertIndex(survey);
+  const idx = survey.findIndex((r) => r.rowId === rowId);
+  if (idx < 0) return defaultInsertIndex(survey);
+  return idx + 1;
+}

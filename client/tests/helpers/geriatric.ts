@@ -571,6 +571,11 @@ export async function setRelevance(
   const row = rowByName(page, name);
   const toggle = row.getByRole('button', { name: /show advanced/ });
   if (await toggle.isVisible().catch(() => false)) await toggle.click();
+  // T9f (#19): the XPath box (and its "✎ build") sits behind the strip's "code" toggle.
+  const codeBtn = row
+    .locator('.cond-strip-unified[data-column="relevant"]')
+    .getByRole('button', { name: 'code', exact: true });
+  if (await codeBtn.isVisible().catch(() => false)) await codeBtn.click();
   await row
     .locator('.expr-field', { hasText: 'Show this question when' })
     .locator('button', { hasText: '✎ build' })
@@ -597,7 +602,7 @@ export async function fillRuleList(
       await scope.getByRole('button', { name: '+ comparison' }).click();
       const rule = scope.locator('.rule-row').last();
       await rule.locator('select').first().selectOption(r.field);
-      const stringToggle = rule.locator('input[type="checkbox"]');
+      const stringToggle = rule.getByRole('checkbox', { name: 'string' });
       if (!(await stringToggle.isChecked())) await stringToggle.check();
       const valueSelect = rule.locator('select.choice-value-select');
       if (await valueSelect.isVisible().catch(() => false)) {

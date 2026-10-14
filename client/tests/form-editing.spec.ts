@@ -666,6 +666,10 @@ test('§H3 follow-up — clicking a structural-issue jumps to the row, forces Fu
 async function openCalcBuilderOnGravidity(page: Page) {
   const gravRow = rowByType(page, /^integer$/);
   await gravRow.getByRole('button', { name: /show advanced/ }).click();
+  // T9f (#19): a plain Number question hides "Compute the value as…" until
+  // the author opts in.
+  const optIn = gravRow.getByRole('button', { name: /compute this value/ });
+  if ((await optIn.count()) > 0) await optIn.click();
   const calcField = gravRow
     .locator('.expr-field')
     .filter({ has: page.locator('code.raw-col-tag', { hasText: 'calculation' }) });

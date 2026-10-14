@@ -350,6 +350,11 @@ async function addNote(page: Page, name: string, label: string, relevance?: stri
     const row = rowByName(page, name);
     const toggle = row.locator('.expand-toggle');
     if ((await toggle.textContent())?.includes('show advanced')) await toggle.click();
+    // T9f (#19): the XPath box (and its "✎ build") sits behind the strip's "code" toggle.
+    const codeBtn = row
+      .locator('.cond-strip-unified[data-column="relevant"]')
+      .getByRole('button', { name: 'code', exact: true });
+    if (await codeBtn.isVisible().catch(() => false)) await codeBtn.click();
     const rel = row.locator('.expr-field').filter({ has: page.locator('strong', { hasText: 'Show this question when' }) });
     await rel.locator('input').fill(relevance);
   }

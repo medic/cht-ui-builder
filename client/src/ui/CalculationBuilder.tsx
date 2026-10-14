@@ -38,7 +38,9 @@ import {
   type ReportFieldChoice,
   type ParsedCalculation,
   type ParsedExpression,
+  serializeRule,
 } from '@cht-ui/shared';
+import { SurveyFieldPicker } from './SurveyFieldPicker.js';
 import { useApp } from '../state/store.js';
 import { RelevantRuleBuilder } from './RelevantRuleBuilder.js';
 import {
@@ -764,20 +766,13 @@ function SingleValuePanel(props: {
       {activeKind === 'field-ref' && (
         <label className="row gap" style={{ alignItems: 'center' }}>
           <span className="muted">Field:</span>
-          <select
+          <SurveyFieldPicker
             value={extractFieldName(props.value)}
-            onChange={(e) =>
-              props.onChange(e.target.value ? emitFieldRef(e.target.value) : '')
-            }
-            aria-label="Field reference"
-          >
-            <option value="">— pick a field —</option>
-            {props.fieldOptions.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+            options={props.fieldOptions}
+            onChange={(name) => props.onChange(name ? emitFieldRef(name) : '')}
+            placeholder="— pick a field —"
+            ariaLabel="Field reference"
+          />
           <code className="muted">saved as <strong>{props.value || '${field}'}</strong></code>
         </label>
       )}
@@ -1172,20 +1167,13 @@ function TypedOutputInput(props: {
         />
       )}
       {kind === 'field-ref' && (
-        <select
+        <SurveyFieldPicker
           value={extractFieldName(props.value)}
-          onChange={(e) =>
-            props.onChange(e.target.value ? emitFieldRef(e.target.value) : '')
-          }
-          aria-label="Field reference"
-        >
-          <option value="">— pick a field —</option>
-          {props.fieldOptions.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+          options={props.fieldOptions}
+          onChange={(name) => props.onChange(name ? emitFieldRef(name) : '')}
+          placeholder="— pick a field —"
+          ariaLabel="Field reference"
+        />
       )}
     </fieldset>
   );
@@ -1341,6 +1329,15 @@ function conditionProse(cond: ParsedExpression): string {
     }
     if (r.kind === 'answered') {
       return `\${${r.field}} ${r.negated ? 'is empty' : 'is answered'}`;
+    }
+    if (r.kind === 'truthy') {
+      return `\${${r.field}} ${r.negated ? 'is not selected' : 'has an answer'}`;
+    }
+    if (r.kind === 'expr-comparison' || r.kind === 'predicate' || r.kind === 'not-group') {
+      return serializeRule(r); // T9a — shown as written until 9e gives presets
+    }
+    if (r.kind === 'always-true') {
+      return 'always passes';
     }
     if (r.kind === 'age') {
       return `age of \${${r.field}} ${r.op} ${r.value} years`;

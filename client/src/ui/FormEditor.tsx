@@ -45,6 +45,8 @@ import {
   planSurveyMove,
   planUngroup,
   defaultInsertIndex,
+  insertIndexAfterRow,
+  parseValidation,
   extractListName,
   renameListInType,
   renameChoiceValue,
@@ -92,6 +94,9 @@ import { LineageBuilder } from './LineageBuilder.js';
 import { InlineChoicesEditor } from './InlineChoicesEditor.js';
 import { ChoiceNameInput } from './ChoiceNameInput.js';
 import { InsertLabelRefButton } from './InsertLabelRefButton.js';
+import { ValidationPanel } from './ValidationPanel.js';
+import { FieldMetaProvider, SurveyFieldPicker, useFieldMeta } from './SurveyFieldPicker.js';
+import './ConditionEditor.css';
 import { useHistory } from '../state/useHistory.js';
 import { showUndoToast } from './UndoToast.js';
 
@@ -556,6 +561,56 @@ function SurveyTab(props: {
   const setError = useApp((s) => s.setError);
   const [mode, setMode] = useState<'simple' | 'full'>('simple');
 
+  // T9d (#17) — the row the author is on (last focused card) decides where
+  // "+ Question" inserts; `flashRowId` scrolls to and highlights a row the
+  // picker just added. One-click tiles are a remembered preference.
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  const [flashRowId, setFlashRowId] = useState<string | null>(null);
+  const [oneClickTiles, setOneClickTilesState] = useState<boolean>(() => {
+    try {
+      // eslint-disable-next-line no-undef
+      return window.localStorage.getItem(ONE_CLICK_TILES_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  function setOneClickTiles(next: boolean): void {
+    setOneClickTilesState(next);
+    try {
+      // eslint-disable-next-line no-undef
+      window.localStorage.setItem(ONE_CLICK_TILES_KEY, next ? 'true' : 'false');
+    } catch {
+      /* storage unavailable — the choice lasts for this session only */
+    }
+  }
+  useEffect(() => {
+    if (!flashRowId) return;
+    // eslint-disable-next-line no-undef
+    const raf = window.requestAnimationFrame(() => {
+      // eslint-disable-next-line no-undef
+      const el = document.querySelector(
+        // eslint-disable-next-line no-undef
+        `[data-row-id="${window.CSS.escape(flashRowId)}"]`,
+        // eslint-disable-next-line no-undef
+      ) as HTMLElement | null;
+      if (!el) {
+        // Hidden in Simple mode (e.g. added inside `inputs/`): show Full and
+        // let the re-run find it.
+        if (mode !== 'full') setMode('full');
+        else setFlashRowId(null);
+        return;
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('row-flash');
+      el.focus({ preventScroll: true });
+      // eslint-disable-next-line no-undef
+      window.setTimeout(() => el.classList.remove('row-flash'), 2500);
+      setFlashRowId(null);
+    });
+    // eslint-disable-next-line no-undef
+    return () => window.cancelAnimationFrame(raf);
+  }, [flashRowId, mode]);
+
   // §H3 follow-up — click-to-jump effect. Runs when the header popover sets
   // `revealRowId`. Two-phase by design: if we're in Simple, structural rows
   // are hidden, so the first run flips mode to 'full' and returns; React
@@ -979,16 +1034,32 @@ function SurveyTab(props: {
         extras: {},
       };
       patch({ ...form, survey: spliceSurvey([beginRow, endRow]) });
+      setFlashRowId(beginRow.rowId);
+      setActiveRowId(beginRow.rowId);
       return;
     }
 
+    // T9d (#17) — the configure step's details, written only when set so
+    // an untouched step adds exactly the row the one-click flow added.
+    const detailExtras: Record<string, string> = {};
+    if (commit.details) {
+      for (const [loc, hint] of Object.entries(commit.details.hints)) {
+        if (hint) detailExtras[`hint::${loc}`] = hint;
+      }
+      if (commit.details.constraint) {
+        detailExtras['constraint'] = commit.details.constraint;
+        for (const [loc, msg] of Object.entries(commit.details.constraintMessages)) {
+          if (msg) detailExtras[`constraint_message::${loc}`] = msg;
+        }
+      }
+    }
     const newRow: SurveyRow = {
       rowId: `r_new_${stamp}_${counter}`,
       type: commit.type,
       name: commit.name || `q${counter}`,
       labels: seedLabels(),
-      required: '',
-      extras: { ...commit.extras },
+      required: commit.details?.required ? 'yes' : '',
+      extras: { ...commit.extras, ...detailExtras },
     };
     let nextChoices = form.choices;
     if (commit.list && commit.list.choices.length > 0) {
@@ -1018,6 +1089,9 @@ function SurveyTab(props: {
       nextChoices = [...form.choices, ...additions];
     }
     patch({ ...form, survey: spliceSurvey([newRow]), choices: nextChoices });
+    // T9d — the author must see where the question landed.
+    setFlashRowId(newRow.rowId);
+    setActiveRowId(newRow.rowId);
   }
 
   /**
@@ -1245,32 +1319,9 @@ function SurveyTab(props: {
       // splice a `${name}` that pyxform refuses to resolve, failing the whole
       // project. The harvest calculate is the sanctioned way to reach an input
       // and it sits outside the block, so it is still offered.
-      const plumbingIds = inputsBlockRowIds(form.survey);
-      // Only names that will actually RESOLVE. Withholding the inputs block is
-      // not sufficient on its own: the scaffold's top-level `patient_id`
-      // calculate shares its name with `inputs/contact/patient_id`, so
-      // `${patient_id}` is ambiguous however few times the picker lists it.
-      // The author who wants that value uses the contact-field insert, which
-      // creates a uniquely-named harvest row.
-      const nameCount = new Map<string, number>();
-      for (const r of form.survey) {
-        if (isStructural(r) || !r.name) continue;
-        nameCount.set(r.name, (nameCount.get(r.name) ?? 0) + 1);
-      }
-      const earlierFields = [
-        ...new Set(
-          form.survey
-            .slice(0, idx)
-            .filter(
-              (r) =>
-                !isStructural(r) &&
-                r.name &&
-                !plumbingIds.has(r.rowId) &&
-                nameCount.get(r.name) === 1,
-            )
-            .map((r) => r.name),
-        ),
-      ];
+      // Only names that will actually RESOLVE — see `pickableFieldsBefore`
+      // (shared with the add-question picker's Validation slot, T9d).
+      const earlierFields = pickableFieldsBefore(form.survey, idx);
       return (
         <SurveyRowCard
           key={row.rowId}
@@ -1358,7 +1409,16 @@ function SurveyTab(props: {
   }
 
   return (
-    <div className="survey-tab">
+    <FieldMetaProvider form={form}>
+    <div
+      className="survey-tab"
+      onFocusCapture={(e) => {
+        // T9d — remember the row the author is working in.
+        const card = (e.target as HTMLElement | null)?.closest?.('[data-row-id]');
+        const id = card?.getAttribute('data-row-id');
+        if (id) setActiveRowId(id);
+      }}
+    >
       {/* Wave 2 §4 — language chip bar. Shows the form's active locales as
           toggle chips (click one to show or hide its label::xx columns on
           every row card — a view filter, never a change to the form) plus a
@@ -1378,7 +1438,16 @@ function SurveyTab(props: {
       />
 
       <div className="row gap toolbar">
-        <button onClick={() => addQuestion(defaultInsertIndex(form.survey))}>+ Question</button>
+        <button
+          onClick={() => addQuestion(insertIndexAfterRow(form.survey, activeRowId))}
+          title={
+            activeRowId
+              ? 'Add a question right after the row you are on'
+              : 'Add a question at the end of the form (before any trailing plumbing)'
+          }
+        >
+          + Question
+        </button>
         {/* Wave 2 §3b — a first-class "+ Add section" toolbar entry beside
              "+ Question". Section-heavy forms (geriatric assessment, ANC)
              were unbuildable end-to-end when the Group tile was hidden in
@@ -1507,6 +1576,16 @@ function SurveyTab(props: {
             setPendingInsertIndex(null);
             setPickerSectionMode(false);
           }}
+          // T9d (#17) — the configure step's Validation slot builds against
+          // the fields BEFORE the insert position, and one-click tiles are
+          // a remembered preference.
+          fieldOptions={pickableFieldsBefore(
+            form.survey,
+            pendingInsertIndex ?? defaultInsertIndex(form.survey),
+          )}
+          fieldChoiceOptions={fieldChoiceOptions}
+          oneClickTiles={oneClickTiles}
+          onOneClickTilesChange={setOneClickTiles}
           onCommit={handlePickerCommit}
         />
       )}
@@ -1558,6 +1637,7 @@ function SurveyTab(props: {
         </>
       )}
     </div>
+    </FieldMetaProvider>
   );
 }
 
@@ -2049,10 +2129,64 @@ function SurveyRowCard(props: {
   };
   const { row, violations } = props;
   const structural = isStructural(row);
-  const expressionsPreview = ['relevant', 'calculation', 'constraint', 'appearance']
-    .map((c) => (row.extras[c] ? `${c}: ${row.extras[c]}` : null))
+  // T9f (#19) — the collapsed caption reads in plain English, never XPath:
+  // the rule chips the editors would show, or a count where there is no
+  // clause form. The XPath itself sits behind each editor's "code" toggle.
+  const fieldMetaForSummary = useFieldMeta();
+  const summaryFieldLabel = (n: string): string => fieldMetaForSummary.get(n)?.label || n;
+  const summaryChoiceLabel = (field: string, value: string): string =>
+    props.fieldChoiceOptions[field]?.find((c) => c.name === value)?.label ?? value;
+  function logicSummary(column: ConditionColumn, lead: string): string | null {
+    const text = row.extras[column];
+    if (!text) return null;
+    const hydrated = conditionBuilderReducer(initialConditionBuilderState, {
+      kind: 'set-column',
+      column,
+      existingValue: text,
+    });
+    if (hydrated.rawFallback !== null) return `${lead} (hand-written rule)`;
+    const flat =
+      hydrated.groups === null
+        ? hydrated.clauses
+            .map((c, i) =>
+              `${i > 0 ? ` ${CONNECTOR_LABELS[hydrated.connectors[i - 1] ?? 'and']} ` : ''}${clauseToProse(c, summaryChoiceLabel, summaryFieldLabel)}`,
+            )
+            .join('')
+        : hydrated.groups
+            .map((g) => `(${g.clauses.map((c) => clauseToProse(c, summaryChoiceLabel, summaryFieldLabel)).join(` ${CONNECTOR_LABELS[g.connector]} `)})`)
+            .join(` ${CONNECTOR_LABELS[hydrated.outerConnector ?? 'and']} `);
+    return flat ? `${lead} ${flat}` : null;
+  }
+  const validationCount = row.extras['constraint'] ? parseValidation(row.extras['constraint']).items.length : 0;
+  const expressionsPreview = [
+    logicSummary('relevant', 'shows when'),
+    logicSummary('choice_filter', 'choices filtered when'),
+    validationCount > 0 ? `${validationCount} validation rule${validationCount === 1 ? '' : 's'}` : null,
+    row.extras['calculation'] ? 'computed' : null,
+    row.extras['appearance'] ? `appearance: ${row.extras['appearance']}` : null,
+  ]
     .filter(Boolean)
     .join('  ·  ');
+
+  // T9f — per-column "code" toggles and the opt-in "compute this value…".
+  // A hand-written rule the sentence editor cannot show opens with its
+  // XPath visible (the author has nothing else to edit); the toggle still
+  // overrides either way.
+  const [codeFor, setCodeFor] = useState<Record<string, boolean>>({});
+  const isHandWritten = (column: ConditionColumn): boolean => {
+    const text = row.extras[column];
+    if (!text) return false;
+    return (
+      conditionBuilderReducer(initialConditionBuilderState, {
+        kind: 'set-column',
+        column,
+        existingValue: text,
+      }).rawFallback !== null
+    );
+  };
+  const codeShown = (column: ConditionColumn): boolean => codeFor[column] ?? isHandWritten(column);
+  const [showCalculation, setShowCalculation] = useState(false);
+  const isCalculateRow = row.type.trim().toLowerCase() === 'calculate';
 
   // Wave 2 §5a — splice `${name}` into the label at the tracked caret.
   // Row-scoped `props.update` is sufficient here — no form-level rows
@@ -2208,14 +2342,30 @@ function SurveyRowCard(props: {
                   ref={(el) => {
                     labelInputRefs.current[loc] = el;
                   }}
-                  value={row.labels[loc] ?? ''}
+                  // T9f (#19) — `NO_LABEL` (the pyxform convention on
+                  // calculates) is shown as an empty box with a hint, never as
+                  // literal text; it is written back unchanged unless the author
+                  // types a real label.
+                  value={row.labels[loc] === 'NO_LABEL' ? '' : (row.labels[loc] ?? '')}
                   onChange={(e) =>
                     props.update((r) => ({
                       ...r,
-                      labels: { ...r.labels, [loc]: e.target.value },
+                      labels: {
+                        ...r.labels,
+                        [loc]:
+                          e.target.value === '' && r.labels[loc] === 'NO_LABEL'
+                            ? 'NO_LABEL'
+                            : e.target.value,
+                      },
                     }))
                   }
-                  placeholder={isMissing ? 'Add translation…' : `label in ${loc}`}
+                  placeholder={
+                    row.labels[loc] === 'NO_LABEL'
+                      ? 'no label (NO_LABEL)'
+                      : isMissing
+                        ? 'Add translation…'
+                        : `label in ${loc}`
+                  }
                 />
                 {/* Wave 2 §5 — insert-field / insert-contact-field popover.
                      Suppressed on structural rows (begin/end group/repeat) —
@@ -2247,50 +2397,50 @@ function SurveyRowCard(props: {
                 patch={props.patch}
               />
             )}
+            {/* T9f (#19) — the advanced panel in four groups: Logic, Display,
+                 Messages, Raw. One sentence-shaped editor per logic column;
+                 the XPath cell and the advanced modal sit behind "code". */}
+            <h4 className="advanced-section">Logic</h4>
             <UnifiedConditionBuilder
-              fieldOptions={props.fieldOptions}
-              fieldChoices={props.fieldChoices}
-              fieldKinds={props.fieldKinds}
-              getColumn={(col) => row.extras[col] ?? ''}
-              setColumn={(col, value) => setExtra(col, value)}
-            />
-            <ExpressionField
-              label="relevant"
-              friendlyLabel="Show this question when…"
-              hint="leave blank to always show"
-              helpText="XPath expression. The question is hidden until this is true. References other fields via ${name}."
+              column="relevant"
               value={row.extras['relevant'] ?? ''}
               onChange={(v) => setExtra('relevant', v)}
               fieldOptions={props.fieldOptions}
+              fieldChoices={props.fieldChoices}
               fieldChoiceOptions={props.fieldChoiceOptions}
-              inputContactFields={props.inputContactFields}
-              contextKeys={props.contextKeys}
+              fieldKinds={props.fieldKinds}
+              showCode={codeShown('relevant')}
+              onToggleCode={() => setCodeFor((c) => ({ ...c, relevant: !codeShown('relevant') }))}
             />
-            <ExpressionField
-              label="calculation"
-              friendlyLabel="Compute the value as…"
-              hint="for calculate or hidden fields"
-              helpText="XPath that computes this field's value from other fields. Common for `calculate` rows; can also pre-fill a regular question."
-              value={row.extras['calculation'] ?? ''}
-              onChange={(v) => setExtra('calculation', v)}
-              fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
-              inputContactFields={props.inputContactFields}
-              contextKeys={props.contextKeys}
-            />
-            <ExpressionField
-              label="constraint"
-              friendlyLabel="Accept the answer only if…"
-              hint="validation rule"
-              helpText="XPath. If the answer doesn't satisfy this, the form blocks submission and shows the constraint_message below."
-              value={row.extras['constraint'] ?? ''}
-              onChange={(v) => setExtra('constraint', v)}
-              fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
-              inputContactFields={props.inputContactFields}
-              contextKeys={props.contextKeys}
-            />
+            <div hidden={!codeShown('relevant')} className="cond-code-box">
+              <ExpressionField
+                label="relevant"
+                friendlyLabel="Show this question when…"
+                hint="leave blank to always show"
+                helpText="XPath expression. The question is hidden until this is true. References other fields via ${name}."
+                value={row.extras['relevant'] ?? ''}
+                onChange={(v) => setExtra('relevant', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                inputContactFields={props.inputContactFields}
+                contextKeys={props.contextKeys}
+              />
+            </div>
             {isSelectRow(row) && (
+              <UnifiedConditionBuilder
+                column="choice_filter"
+                value={row.extras['choice_filter'] ?? ''}
+                onChange={(v) => setExtra('choice_filter', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoices={props.fieldChoices}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                fieldKinds={props.fieldKinds}
+                showCode={codeShown('choice_filter')}
+                onToggleCode={() => setCodeFor((c) => ({ ...c, choice_filter: !codeShown('choice_filter') }))}
+              />
+            )}
+            {isSelectRow(row) && (
+              <div hidden={!codeShown('choice_filter')} className="cond-code-box">
               <ExpressionField
                 label="choice_filter"
                 friendlyLabel="Filter the choice list when…"
@@ -2299,11 +2449,72 @@ function SurveyRowCard(props: {
                 value={row.extras['choice_filter'] ?? ''}
                 onChange={(v) => setExtra('choice_filter', v)}
                 fieldOptions={props.fieldOptions}
-              fieldChoiceOptions={props.fieldChoiceOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
                 inputContactFields={props.inputContactFields}
                 contextKeys={props.contextKeys}
               />
+              </div>
             )}
+            {/* "Compute the value as…" only for calculate rows, or on request:
+                 a plain Number question has no business showing it. */}
+            {(isCalculateRow || row.extras['calculation'] || showCalculation) ? (
+              <ExpressionField
+                label="calculation"
+                friendlyLabel="Compute the value as…"
+                hint={isCalculateRow ? 'the value of this calculate row' : 'pre-fills this question'}
+                helpText="XPath that computes this field's value from other fields. Common for `calculate` rows; can also pre-fill a regular question."
+                value={row.extras['calculation'] ?? ''}
+                onChange={(v) => setExtra('calculation', v)}
+                fieldOptions={props.fieldOptions}
+                fieldChoiceOptions={props.fieldChoiceOptions}
+                inputContactFields={props.inputContactFields}
+                contextKeys={props.contextKeys}
+              />
+            ) : (
+              <button
+                type="button"
+                className="link small"
+                onClick={() => setShowCalculation(true)}
+                title="Add an XPath that pre-fills this question's value"
+              >
+                + compute this value…
+              </button>
+            )}
+            {/* T9e (#18) — the Validation panel replaces the constraint
+                 expression field, the strip's constraint column and the
+                 "✎ build" modal for this column. Messages live beside the
+                 rule; required and its message beside them. */}
+            <ValidationPanel
+              questionType={row.type}
+              value={row.extras['constraint'] ?? ''}
+              onChange={(v) => setExtra('constraint', v)}
+              locales={props.locales.filter((loc) => !props.hiddenLocales.has(loc))}
+              messages={Object.fromEntries(
+                props.locales.map((loc) => [loc, row.extras[`constraint_message::${loc}`] ?? '']),
+              )}
+              onMessageChange={(loc, v) => setExtra(`constraint_message::${loc}`, v)}
+              onBatch={(changes) =>
+                props.update((r) => {
+                  const nextExtras = { ...r.extras };
+                  for (const [k, v] of Object.entries(changes)) {
+                    if (v === '') delete nextExtras[k];
+                    else nextExtras[k] = v;
+                  }
+                  return { ...r, extras: nextExtras };
+                })
+              }
+              required={Boolean(row.required && row.required !== 'no' && row.required !== 'false')}
+              onRequiredChange={(next) =>
+                props.update((r) => ({ ...r, required: next ? 'yes' : '' }))
+              }
+              requiredMessages={Object.fromEntries(
+                props.locales.map((loc) => [loc, row.extras[`required_message::${loc}`] ?? '']),
+              )}
+              onRequiredMessageChange={(loc, v) => setExtra(`required_message::${loc}`, v)}
+              fieldOptions={props.fieldOptions}
+              choices={props.fieldChoiceOptions[row.name] ?? []}
+            />
+            <h4 className="advanced-section">Display</h4>
             <AppearanceField
               value={row.extras['appearance'] ?? ''}
               rowType={row.type}
@@ -2332,8 +2543,9 @@ function SurveyRowCard(props: {
                 onChange={(v) => setExtra('repeat_count', v)}
               />
             )}
+            <h4 className="advanced-section">Messages</h4>
             <details className="raw-extras">
-              <summary>Hints &amp; error messages</summary>
+              <summary>Help text (hints) — error messages live in Validation above</summary>
               <div className="hints-grid">
                 {props.locales
                   .filter((loc) => !props.hiddenLocales.has(loc))
@@ -2348,22 +2560,10 @@ function SurveyRowCard(props: {
                     onChange={(v) => setExtra(`hint::${loc}`, v)}
                   />
                 ))}
-                {row.extras['constraint'] &&
-                  props.locales
-                    .filter((loc) => !props.hiddenLocales.has(loc))
-                    .map((loc) => (
-                    <ExpressionField
-                      key={`cmsg-${loc}`}
-                      label={`constraint_message::${loc}`}
-                      friendlyLabel={`Error message (${loc})`}
-                      hint="when the constraint above fails"
-                      helpText="Shown to the user when the constraint rejects their answer. Only meaningful when a constraint is set."
-                      value={row.extras[`constraint_message::${loc}`] ?? ''}
-                      onChange={(v) => setExtra(`constraint_message::${loc}`, v)}
-                    />
-                  ))}
+                {/* constraint_message inputs moved into the Validation panel (T9e). */}
               </div>
             </details>
+            <h4 className="advanced-section">Raw</h4>
             <details className="raw-extras">
               <summary>Raw column overrides (preserved from xlsx)</summary>
               {Object.entries(row.extras)
@@ -2379,7 +2579,8 @@ function SurveyRowCard(props: {
                       'repeat_count',
                     ].includes(k) &&
                     !k.startsWith('hint::') &&
-                    !k.startsWith('constraint_message::'),
+                    !k.startsWith('constraint_message::') &&
+                    !k.startsWith('required_message::'),
                 )
                 .map(([k, v]) => (
                   <ExpressionField
@@ -2393,9 +2594,7 @@ function SurveyRowCard(props: {
             </details>
           </div>
         )}
-        {!expanded && expressionsPreview && (
-          <div className="expr-preview muted">{expressionsPreview}</div>
-        )}
+        {/* T9f — the code bar that repeated the toggle caption is gone. */}
         {violations.length > 0 && (
           <div className="violation-banner">
             <strong>Dependency issue:</strong>{' '}
@@ -2874,12 +3073,6 @@ const COND_OPS_NEED_VALUE: CondOp[] = ['=', '!=', '>', '<', '>=', '<=', 'selecte
 // not a boolean, and is edited via the dedicated CalculationBuilder
 // (mounted by ExpressionField when `supportsCalculation` holds). See
 // docs/plans/calculation-builder.md v0.2 §3.6 — "double-door" fix.
-const COLUMN_OPTIONS = [
-  { value: 'relevant', label: 'Show when… (relevant)' },
-  { value: 'constraint', label: 'Accept only if… (constraint)' },
-  { value: 'choice_filter', label: 'Filter choices when… (choice_filter)' },
-] as const;
-
 /** Microcopy per plan §10. */
 const CONNECTOR_LABELS = { and: 'and also', or: 'or instead' } as const;
 
@@ -2932,15 +3125,68 @@ const OPERATOR_LABELS: Record<ClauseOp, string> = {
   today: 'today',
 };
 
-function clauseToProse(c: Clause): string {
-  if (c.op === '=' || c.op === '!=' || c.op === '>' || c.op === '<' || c.op === '>=' || c.op === '<=') {
-    return `${c.field} ${COMPARISON_PROSE[c.op]} ${c.value}`;
+/** localStorage key for the "always skip the configure step" preference (T9d). */
+const ONE_CLICK_TILES_KEY = 'cht-ui-builder.oneClickTiles';
+
+/**
+ * Field names a rule on the row at `idx` may reference: every named,
+ * non-structural row BEFORE `idx` that is outside the `inputs/` block and
+ * whose name is unique in the survey, in sheet order.
+ *
+ * Both matter for the same reason: `${x}` resolves by NAME across the
+ * whole survey, and the inputs block deliberately reuses names from
+ * outside it — the scaffold has `inputs/user/name` and
+ * `inputs/contact/name`, plus `inputs/contact/patient_id` next to a
+ * top-level calculate called `patient_id`. Offering those let one click
+ * splice a `${name}` that pyxform refuses to resolve, failing the whole
+ * project. The harvest calculate is the sanctioned way to reach an input
+ * and it sits outside the block, so it is still offered. The author who
+ * wants an ambiguous value uses the contact-field insert, which creates a
+ * uniquely-named harvest row.
+ */
+function pickableFieldsBefore(survey: SurveyRow[], idx: number): string[] {
+  const plumbingIds = inputsBlockRowIds(survey);
+  const nameCount = new Map<string, number>();
+  for (const r of survey) {
+    if (isStructural(r) || !r.name) continue;
+    nameCount.set(r.name, (nameCount.get(r.name) ?? 0) + 1);
   }
-  if (c.op === 'selected') return `${c.field} includes ${c.value}`;
-  if (c.op === 'selected-not') return `${c.field} does not include ${c.value}`;
-  if (c.op === 'not') return `not(\${${c.field}})`;
-  if (c.op === 'ref') return `\${${c.field}}`;
-  return 'today()';
+  return [
+    ...new Set(
+      survey
+        .slice(0, idx)
+        .filter(
+          (r) =>
+            !isStructural(r) && r.name && !plumbingIds.has(r.rowId) && nameCount.get(r.name) === 1,
+        )
+        .map((r) => r.name),
+    ),
+  ];
+}
+
+function clauseToProse(
+  c: Clause,
+  /** T9c (#16) — choice label for readback; the clause keeps the name. */
+  labelFor: (field: string, value: string) => string = (_f, v) => v,
+  /** T9f (#19) — question label for readback; the clause keeps the name. */
+  fieldLabel: (field: string) => string = (f) => f,
+): string {
+  const f = fieldLabel(c.field);
+  // A `${other}` value reads as that question's label too.
+  const v = /^\$\{([^}]+)\}$/.test(c.value)
+    ? fieldLabel(c.value.slice(2, -1))
+    : c.value;
+  if (c.op === '=' || c.op === '!=') {
+    return `${f} ${COMPARISON_PROSE[c.op]} ${labelFor(c.field, v)}`;
+  }
+  if (c.op === '>' || c.op === '<' || c.op === '>=' || c.op === '<=') {
+    return `${f} ${COMPARISON_PROSE[c.op]} ${v}`;
+  }
+  if (c.op === 'selected') return `${f} includes ${labelFor(c.field, c.value)}`;
+  if (c.op === 'selected-not') return `${f} does not include ${labelFor(c.field, c.value)}`;
+  if (c.op === 'not') return `${f} is not selected`;
+  if (c.op === 'ref') return `${f} has an answer`;
+  return 'today';
 }
 
 /**
@@ -2969,24 +3215,47 @@ function clauseToProse(c: Clause): string {
  *     show the banner and keep chaining disabled; the existing text stays
  *     visible + editable in the ExpressionField below.
  */
+/** Lead-in sentence per logic column (T9f, #19). */
+const COLUMN_LEAD: Record<ConditionColumn, { lead: string; readback: string }> = {
+  relevant: { lead: 'Show this question when', readback: 'This row shows when:' },
+  constraint: { lead: 'Accept the answer only if', readback: 'The answer is accepted when:' },
+  choice_filter: { lead: 'Filter the choice list when', readback: 'Choices are filtered when:' },
+};
+
 function UnifiedConditionBuilder(props: {
+  /**
+   * T9f (#19) — the editor is bound to ONE column; the column is implied by
+   * the field being edited, never chosen from a dropdown.
+   */
+  column: ConditionColumn;
+  /** The cell's current text. The editor re-hydrates whenever it changes from outside. */
+  value: string;
+  onChange: (value: string) => void;
   fieldOptions: string[];
   fieldChoices: Record<string, string[]>;
+  /** T9c (#16) — same map with labels, for the value picker and readback. */
+  fieldChoiceOptions?: Record<string, ReportFieldChoice[]>;
   /** FieldKind per field name. Missing keys fall through to 'unknown'
    *  (always-pass) — see plan v0.3 §3 never-de-emphasize contract. */
   fieldKinds: Record<string, FieldKind>;
-  getColumn: (col: string) => string;
-  setColumn: (col: string, value: string) => void;
+  /** The "code" toggle: shows the XPath cell and the advanced builder below. */
+  showCode: boolean;
+  onToggleCode: () => void;
 }) {
   const [state, dispatch] = useReducer(conditionBuilderReducer, initialConditionBuilderState);
+  const fieldMeta = useFieldMeta();
+  const fieldLabel = (name: string): string => fieldMeta.get(name)?.label || name;
 
-  // Whenever the user picks a column, hydrate the reducer from its
-  // existing value. parseRelevantGrouped routes anything outside our
-  // grammar to rawFallback (chaining disabled, text preserved).
-  function onPickColumn(col: ConditionColumn | ''): void {
-    const existingValue = col ? props.getColumn(col) : '';
-    dispatch({ kind: 'set-column', column: col, existingValue });
-  }
+  // Hydrate from the cell on mount and whenever it changes from outside
+  // (the code box, undo). Our own writes echo back as the same text, so
+  // they do not re-hydrate mid-edit. parseRelevantGrouped routes anything
+  // outside our grammar to rawFallback (chaining disabled, text preserved).
+  const lastWritten = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastWritten.current !== null && lastWritten.current === props.value) return;
+    lastWritten.current = props.value;
+    dispatch({ kind: 'set-column', column: props.column, existingValue: props.value });
+  }, [props.column, props.value]);
 
   function setDraft(partial: Partial<Clause>): void {
     dispatch({ kind: 'set-draft', partial });
@@ -3018,11 +3287,12 @@ function UnifiedConditionBuilder(props: {
 
   function doInsert(): void {
     if (!state.column || !isInsertReady(state)) return;
-    // Write the serialized chain to row.extras[column], replacing whatever's
-    // there. Different from today's append-on-insert: chaining now produces
-    // the FULL expression, so we own the column's value end-to-end.
+    // Write the serialized chain to the cell, replacing whatever's there:
+    // chaining produces the FULL expression, so we own the column's value
+    // end-to-end. Every write goes through serializeAnyParsed.
     const out = serializeBuilderState(state);
-    props.setColumn(state.column, out);
+    lastWritten.current = out;
+    props.onChange(out);
     // Reset the session by re-hydrating against the just-written value.
     dispatch({ kind: 'set-column', column: state.column, existingValue: out });
   }
@@ -3068,44 +3338,24 @@ function UnifiedConditionBuilder(props: {
   const needsField = (COND_OPS_NEED_FIELD as string[]).includes(state.draft.op);
   const needsValue = (COND_OPS_NEED_VALUE as string[]).includes(state.draft.op);
 
-  // ---- v0.3 type-aware soft filter --------------------------------------
-  // Local UI state only — NEVER enters BuilderState or any serialization
-  // path (Lal/Developer A7). If a saved/rehydrated field would be atypical
-  // for the current op, default the toggle to ON so the saved selection is
-  // never visually stranded.
-  const [showAllFields, setShowAllFields] = useState(false);
+  // ---- v0.3 type-aware ordering ------------------------------------------
+  // Render data only — NEVER enters BuilderState or any serialization path
+  // (Lal/Developer A7). Since T9c (#16) the picker groups by section and
+  // uses op-typicality purely to order fields inside a section, so there is
+  // no "Show all fields" toggle to strand a saved selection behind.
   const kindOf = (n: string): FieldKind => props.fieldKinds[n] ?? 'unknown';
 
-  // Op-first partition for the field picker. Active whenever the op takes
-  // a field (so `today` doesn't activate filtering; the field select is
-  // disabled in that case anyway). Selected field is forced into the
-  // typical bucket so it always renders adjacent to the picker.
-  const fieldHasOpHint = needsField;
-  const splitFieldsByOp = fieldHasOpHint && !showAllFields;
-  const typicalFields: string[] = [];
-  const atypicalFields: string[] = [];
-  if (splitFieldsByOp) {
-    for (const name of props.fieldOptions) {
-      if (name === state.draft.field) {
-        typicalFields.push(name);
-      } else if (fieldsTypicalForOp(state.draft.op, kindOf(name))) {
-        typicalFields.push(name);
-      } else {
-        atypicalFields.push(name);
-      }
-    }
-  }
-  // Auto-relax: if the rehydrated/selected field is atypical for the
-  // current op, surface it by forcing the flat list on next render. We
-  // use a ref-like effect to flip the toggle exactly once per mismatch.
-  useEffect(() => {
-    if (!splitFieldsByOp) return;
-    if (!state.draft.field) return;
-    const k = kindOf(state.draft.field);
-    if (!fieldsTypicalForOp(state.draft.op, k)) setShowAllFields(true);
-    // intentionally narrow deps — only react to draft.field/op transitions
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.draft.field, state.draft.op]);
+  // T9c — choice LABELS in the value picker and the readback; the value
+  // written stays the choice name.
+  const choiceLabel = (field: string, value: string): string =>
+    props.fieldChoiceOptions?.[field]?.find((c) => c.name === value)?.label ?? value;
+  const prose = (c: Clause): string => clauseToProse(c, choiceLabel, fieldLabel);
+
+  // T9c — value cell mode: a typed literal, or another question picked
+  // from the same field picker. A `${…}` draft value (e.g. after a
+  // rehydrate) always shows as a picked question.
+  const [valueModeField, setValueIsField] = useState(false);
+  const valueIsField = valueModeField || /^\$\{[^}]+\}$/.test(state.draft.value);
 
   // Field-first partition for the op picker. Grouping only — every op
   // always stays in the DOM (no escape-hatch toggle needed; A6/A7).
@@ -3128,14 +3378,13 @@ function UnifiedConditionBuilder(props: {
     ];
   })();
 
-  // "Stacked" iff the FLAT chain has reached the chip threshold. Plan §4:
-  // "the stacked-clause/chip UI only appears once a second clause exists."
-  // In grouped mode the card stack always renders.
+  // T9f (#19): the readback renders from the FIRST committed clause (plan §4
+  // showed chips only from the second one, which left a single reopened
+  // clause invisible). In grouped mode the card stack always renders.
   const draftEmpty = isDraftEmpty(state.draft);
-  const stacked = state.clauses.length >= 2 || (state.clauses.length >= 1 && !draftEmpty);
 
-  const proseChips = state.clauses.map(clauseToProse);
-  const draftProse = isDraftComplete(state.draft) ? clauseToProse(state.draft) : '…';
+  const proseChips = state.clauses.map(prose);
+  const draftProse = isDraftComplete(state.draft) ? prose(state.draft) : '…';
 
   // Group-mode derived state.
   const activeGroup: Subgroup | null =
@@ -3153,7 +3402,7 @@ function UnifiedConditionBuilder(props: {
     state.groups.filter((g) => g.clauses.length > 0).length <= 1;
 
   return (
-    <div className="cond-strip cond-strip-unified">
+    <div className="cond-strip cond-strip-unified" data-column={props.column}>
       {state.rawFallback !== null && (
         <div
           className="muted"
@@ -3178,7 +3427,7 @@ function UnifiedConditionBuilder(props: {
           style={{ width: '100%' }}
         >
           <div className="muted ref-chips-hint" style={{ marginBottom: 4 }}>
-            This row shows when:
+            {COLUMN_LEAD[props.column].readback}
           </div>
           {state.groups.map((sg, gi) => (
             <Fragment key={gi}>
@@ -3216,7 +3465,7 @@ function UnifiedConditionBuilder(props: {
                           {CONNECTOR_LABELS[sg.connector]}
                         </span>
                       )}
-                      <code className="cond-preview">{clauseToProse(c)}</code>
+                      <code className="cond-preview">{prose(c)}</code>
                       <button
                         type="button"
                         className="link"
@@ -3299,10 +3548,10 @@ function UnifiedConditionBuilder(props: {
       )}
 
       {/* Flat-mode chip row — only when not grouped. */}
-      {state.groups === null && stacked && state.rawFallback === null && (
+      {state.groups === null && (state.clauses.length >= 1 || !draftEmpty) && state.rawFallback === null && (
         <div style={{ width: '100%' }}>
           <div className="muted ref-chips-hint" style={{ marginBottom: 4 }}>
-            This row shows when:{' '}
+            {COLUMN_LEAD[props.column].readback}{' '}
             {state.clauses.map((_, i) => (
               <span key={i}>
                 {i > 0 && (
@@ -3335,7 +3584,7 @@ function UnifiedConditionBuilder(props: {
                     {CONNECTOR_LABELS[state.connectors[i - 1] ?? 'and']}
                   </span>
                 )}
-                <code className="cond-preview">{clauseToProse(c)}</code>
+                <code className="cond-preview">{prose(c)}</code>
                 <button
                   type="button"
                   className="link"
@@ -3355,73 +3604,26 @@ function UnifiedConditionBuilder(props: {
         </div>
       )}
 
-      <span className="muted ref-chips-hint">build:</span>
-      <select
-        className="ref-chip-select"
-        value={state.column}
-        onChange={(e) => onPickColumn(e.target.value as ConditionColumn | '')}
-        title="Which column to add the fragment to"
-      >
-        <option value="">— column —</option>
-        {COLUMN_OPTIONS.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-      </select>
-      <select
-        className="ref-chip-select"
+      {/* T9f (#19): the sentence lead-in. The column is implied. */}
+      <span className="cond-lead">
+        {COLUMN_LEAD[props.column].lead}
+        <code className="raw-col-tag" title={`Raw XLSForm column: ${props.column}`}>
+          {props.column}
+        </code>
+      </span>
+      {/* T9c (#16): the shared searchable picker — label + name, grouped by
+          section, technical rows behind a toggle. The op-typicality from
+          plan v0.3 survives as ordering inside each section; nothing is
+          ever withheld because of the op. */}
+      <SurveyFieldPicker
         value={state.draft.field}
-        onChange={(e) => setDraft({ field: e.target.value, value: '' })}
+        options={props.fieldOptions}
+        onChange={(name) => setDraft({ field: name, value: '' })}
+        typicalFor={needsField ? (n) => fieldsTypicalForOp(state.draft.op, kindOf(n)) : undefined}
+        placeholder="— field —"
         title="Pick a field"
         disabled={state.rawFallback !== null || !needsField}
-      >
-        <option value="">— field —</option>
-        {splitFieldsByOp ? (
-          <>
-            <optgroup label="Typical for this check">
-              {typicalFields.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </optgroup>
-            {atypicalFields.length > 0 && (
-              <optgroup label="Other fields">
-                {atypicalFields.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </>
-        ) : (
-          props.fieldOptions.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))
-        )}
-      </select>
-      {/* "Show all fields" — persistent escape hatch (plan v0.3 §3). Only
-          rendered when the op-first filter is actually active; otherwise
-          it would be a confusing no-op. Local UI state, never persisted. */}
-      {fieldHasOpHint && (
-        <label
-          className="muted"
-          style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          title="Show every field, including those less common for this check"
-        >
-          <input
-            type="checkbox"
-            checked={showAllFields}
-            onChange={(e) => setShowAllFields(e.target.checked)}
-            disabled={state.rawFallback !== null}
-          />
-          Show all fields
-        </label>
-      )}
+      />
       <select
         className="ref-chip-select"
         value={state.draft.op}
@@ -3450,18 +3652,47 @@ function UnifiedConditionBuilder(props: {
           <option value="">— value —</option>
           {choices.map((c) => (
             <option key={c} value={c}>
-              {c}
+              {choiceLabel(state.draft.field, c) === c ? c : `${choiceLabel(state.draft.field, c)} (${c})`}
             </option>
           ))}
         </select>
+      ) : valueIsField ? (
+        // T9c — the value is another question: pick it, never type `${…}`.
+        <SurveyFieldPicker
+          value={/^\$\{([^}]+)\}$/.exec(state.draft.value)?.[1] ?? ''}
+          options={props.fieldOptions}
+          onChange={(name) => setDraft({ value: name ? `\${${name}}` : '' })}
+          placeholder="— another question —"
+          title="Compare against another question's answer"
+          disabled={state.rawFallback !== null || !needsValue}
+        />
       ) : (
         <input
           className="cond-value-input"
           value={state.draft.value}
           onChange={(e) => setDraft({ value: e.target.value })}
-          placeholder="value or ${other_field}"
+          placeholder="value"
           disabled={state.rawFallback !== null || !needsValue}
         />
+      )}
+      {needsValue && !(choices && choices.length > 0) && (
+        <button
+          type="button"
+          className="link small"
+          onClick={(e) => {
+            e.preventDefault();
+            setValueIsField((v) => !v);
+            setDraft({ value: '' });
+          }}
+          disabled={state.rawFallback !== null}
+          title={
+            valueIsField
+              ? 'Type a literal value instead'
+              : "Compare against another question's answer instead of a typed value"
+          }
+        >
+          {valueIsField ? 'type a value' : 'another question'}
+        </button>
       )}
 
       {/* Between-clause connector picker. Visible whenever a chain is in
@@ -3544,13 +3775,9 @@ function UnifiedConditionBuilder(props: {
           doInsert();
         }}
         disabled={!isInsertReady(state)}
-        title={
-          state.column
-            ? `Write the full chain to ${state.column}`
-            : 'Pick a column first'
-        }
+        title={`Write this rule to ${props.column}`}
       >
-        + insert
+        Apply
       </button>
       <button
         type="button"
@@ -3582,6 +3809,19 @@ function UnifiedConditionBuilder(props: {
           ↶ undo last clause
         </button>
       )}
+      {/* T9f — the XPath is available, not in the way. */}
+      <button
+        type="button"
+        className="link small cond-code-toggle"
+        onClick={(e) => {
+          e.preventDefault();
+          props.onToggleCode();
+        }}
+        aria-pressed={props.showCode}
+        title={props.showCode ? 'Hide the XPath for this rule' : 'Show and edit the XPath for this rule'}
+      >
+        {props.showCode ? 'hide code' : 'code'}
+      </button>
     </div>
   );
 }

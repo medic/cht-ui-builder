@@ -820,3 +820,176 @@ test('relabel guard: every ClauseOp value is one of the canonical 11 (no label l
 test('FieldKind co-domain mirror stays in sync with classifier', () => {
   assert.equal(ALL_FIELD_KINDS_INC_UNKNOWN.length, 6);
 });
+
+/* ------------------- T9b (#15): reopen "has an answer" / "is not selected" ------------------- */
+/*
+ * Two distinct defects met at `ruleToClause`, so they are pinned separately.
+ * A bare `${f}` fixture exercises the (formerly raw) truthy path and never
+ * the `answered` path; `${f} != ''` is the reverse. One test cannot cover
+ * both — the assertions on the parser kind below make that explicit.
+ */
+
+test('T9b case (a): `${field}` written by the inline builder reopens as op=ref with chaining enabled', () => {
+  // The builder itself emits this exact text for "has an answer".
+  let written = withColumn('relevant');
+  written = setDraft(written, { field: 'lmp_approx', op: 'ref', value: '' });
+  const bytes = serializeBuilderState(written);
+  assert.equal(bytes, '${lmp_approx}');
+  // Document which parser path this fixture exercises (NOT `answered`).
+  assert.equal(parseRelevant(bytes).rules[0]?.kind, 'truthy');
+
+  const reopened = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: bytes,
+  });
+  assert.equal(reopened.rawFallback, null);
+  assert.deepEqual(reopened.clauses, [{ field: 'lmp_approx', op: 'ref', value: '' }]);
+  assert.equal(serializeBuilderState(reopened), bytes);
+});
+
+test('T9b case (a): `not(${field})` written by the inline builder reopens as op=not, and chains', () => {
+  let written = withColumn('relevant');
+  written = setDraft(written, { field: 'danger_signs', op: 'not', value: '' });
+  written = commit(written, 'and');
+  written = setDraft(written, { field: 'age', op: '>', value: '18' });
+  const bytes = serializeBuilderState(written);
+  assert.equal(bytes, 'not(${danger_signs}) and ${age} > 18');
+
+  const reopened = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: bytes,
+  });
+  assert.equal(reopened.rawFallback, null);
+  assert.deepEqual(reopened.clauses, [
+    { field: 'danger_signs', op: 'not', value: '' },
+    { field: 'age', op: '>', value: '18' },
+  ]);
+  assert.equal(reopened.lockedConnector, 'and');
+  assert.equal(serializeBuilderState(reopened), bytes);
+});
+
+test('T9b case (a): a spacing-divergent `${ field }` is still raw (self-check stays authoritative)', () => {
+  const existing = '${ lmp_approx }';
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, existing);
+  assert.equal(s.clauses.length, 0);
+});
+
+test("T9b case (b): `${field} != ''` (parser kind `answered`) reopens as \"has an answer\" and is re-emitted unchanged", () => {
+  const existing = "${lmp_date} != ''";
+  // Document which parser path this fixture exercises (NOT `truthy`).
+  assert.equal(parseRelevant(existing).rules[0]?.kind, 'answered');
+
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.equal(s.clauses.length, 1);
+  assert.equal(s.clauses[0]?.field, 'lmp_date');
+  assert.equal(s.clauses[0]?.op, 'ref');
+  assert.equal(s.clauses[0]?.value, '');
+  // Invariant 1 — never normalised to `${lmp_date}`.
+  assert.equal(serializeBuilderState(s), existing);
+});
+
+test("T9b case (b): `${field} = ''` reopens as \"is not selected\" and chains without rewriting the spelling", () => {
+  const existing = "${lmp_date} = '' and ${sex} = 'female'";
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.equal(s.clauses.length, 2);
+  assert.equal(s.clauses[0]?.op, 'not');
+  assert.deepEqual(s.clauses[1], { field: 'sex', op: '=', value: 'female' });
+  assert.equal(serializeBuilderState(s), existing);
+
+  // Appending a clause keeps the hydrated spelling and emits the new one canonically.
+  const extended = commit(setDraft(s, { field: 'age', op: '>', value: '18' }), 'and');
+  assert.equal(serializeBuilderState(extended), `${existing} and \${age} > 18`);
+});
+
+/* --------------- T9a (#14): `../field` opens as a clause and saves back as written --------------- */
+
+test('T9a: `selected(../lmp_approx, …)` hydrates as a selected clause and re-emits the ../ spelling', () => {
+  const existing = "selected(../lmp_approx, 'approx_weeks')";
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.equal(s.clauses.length, 1);
+  assert.equal(s.clauses[0]?.field, 'lmp_approx');
+  assert.equal(s.clauses[0]?.op, 'selected');
+  assert.equal(s.clauses[0]?.value, 'approx_weeks');
+  assert.equal(serializeBuilderState(s), existing);
+  // A clause the user adds is emitted canonically (${}); the hydrated one keeps ../.
+  const extended = commit(setDraft(s, { field: 'gravidity', op: '>', value: '3' }), 'and');
+  assert.equal(serializeBuilderState(extended), `${existing} and \${gravidity} > 3`);
+});
+
+test("T9a: `../lmp_date_8601 != ''` and `../f = 'x'` hydrate as clauses, chain, and stay byte-identical", () => {
+  const existing = "../lmp_date_8601 != '' and ../lmp_approx = 'approx_weeks'";
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'relevant',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.deepEqual(
+    s.clauses.map((c) => [c.field, c.op, c.value]),
+    [
+      ['lmp_date_8601', 'ref', ''],
+      ['lmp_approx', '=', 'approx_weeks'],
+    ],
+  );
+  assert.equal(s.lockedConnector, 'and');
+  assert.equal(serializeBuilderState(s), existing);
+});
+
+test('T9a: a ${} clause whose VALUE is ../other keeps the value text as written', () => {
+  const existing = '${a} = ../b';
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'constraint',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, null);
+  assert.deepEqual(
+    s.clauses.map((c) => [c.field, c.op, c.value]),
+    [['a', '=', '../b']],
+  );
+  // The strip's own canonical emission would quote `../b` as a string, so the
+  // hydrated clause keeps its spelling and writes back exactly these bytes.
+  assert.equal(serializeBuilderState(s), existing);
+});
+
+test('T9a: `.`-subject rules are structured in the parser but have no clause yet → raw fallback in the strip (9e owns them)', () => {
+  const existing = '. >= 0 and . <= 20';
+  assert.equal(parseRelevant(existing).isRawFallback, false);
+  const s = conditionBuilderReducer(initialConditionBuilderState, {
+    kind: 'set-column',
+    column: 'constraint',
+    existingValue: existing,
+  });
+  assert.equal(s.rawFallback, existing);
+  assert.equal(s.clauses.length, 0);
+});
+
+test('T9b case (b): a stale `source` that no longer describes the clause is ignored, not emitted', () => {
+  // Only reachable by a caller constructing state by hand — the reducer never
+  // edits a committed clause — but the guard is what makes `source` safe.
+  let s = withColumn('relevant');
+  s = setDraft(s, { field: 'other', op: 'ref', value: '', source: "${lmp_date} != ''" });
+  assert.equal(serializeBuilderState(s), '${other}');
+});

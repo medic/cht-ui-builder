@@ -24,7 +24,9 @@ export default defineConfig({
   testDir: './tests',
   // The hosted-mode acceptance needs its own server (CHT_UI_MODE=hosted,
   // throwaway DATA_ROOT) — see playwright.hosted.config.ts.
-  testIgnore: /hosted-authoring\.spec\.ts$/,
+  // The T9 feature demos record videos under their own config
+  // (playwright.demo.config.ts); they are not part of the suite.
+  testIgnore: [/hosted-authoring\.spec\.ts$/, /t9-demos[\/]/],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
@@ -67,7 +69,15 @@ export default defineConfig({
       origins: [
         {
           origin: 'http://localhost:5173',
-          localStorage: [{ name: 'cht-ui-builder.hiddenTabs', value: '[]' }],
+          localStorage: [
+            { name: 'cht-ui-builder.hiddenTabs', value: '[]' },
+            // T9d (#17) — the add-question picker now has a configure step
+            // after a question tile. The build specs were written against
+            // one-click tiles, so the suite runs as an author who ticked
+            // "always skip this step". `add-question-configure.spec.ts`
+            // clears the key to drive the step itself.
+            { name: 'cht-ui-builder.oneClickTiles', value: 'true' },
+          ],
         },
       ],
     },
