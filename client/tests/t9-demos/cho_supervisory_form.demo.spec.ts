@@ -377,7 +377,7 @@ async function addSection(page: Page, s: Section): Promise<Locator> {
   await htype(p.locator('input[placeholder="e.g. Danger signs"]'), s.en);
   await expect(p.locator('code', { hasText: s.slug })).toBeVisible();
   await htype(localeInput(p, 'ne'), s.ne);
-  await hclick(p.getByRole('button', { name: 'Add section', exact: true }), 700);
+  await hclick(p.getByRole('button', { name: 'Add section', exact: true }));
   await expect(p).not.toBeVisible();
   const accordion = page.locator('.survey-group-accordion').filter({
     has: page.locator('.survey-group-header code', { hasText: new RegExp(`^${s.slug}$`) }),
@@ -398,7 +398,6 @@ async function addRow(page: Page, row: Row): Promise<Locator> {
       .locator('.qtype-tile')
       .filter({ has: page.locator('.qtype-tile-label', { hasText: new RegExp(`^${row.tile}$`) }) })
       .first(),
-    600,
   );
   if (row.list || row.reuse) {
     await expect(p.getByText(/needs a list of options/)).toBeVisible();
@@ -408,23 +407,22 @@ async function addRow(page: Page, row: Row): Promise<Locator> {
           .locator('.qtype-list-choice label', { hasText: 'Reuse' })
           .filter({ has: page.locator('code', { hasText: new RegExp(`^${row.reuse}$`) }) })
           .locator('input'),
-        600,
       );
     } else if (row.list) {
       await htype(p.getByPlaceholder('options'), row.list.name);
       const choiceRows = p.locator('.qtype-choice-row');
       while ((await choiceRows.count()) < row.list.choices.length) {
-        await hclick(p.locator('.qtype-choices-edit').getByRole('button', { name: '+ Add choice' }), 200);
+        await hclick(p.locator('.qtype-choices-edit').getByRole('button', { name: '+ Add choice' }));
       }
       for (let i = 0; i < row.list.choices.length; i++) {
         const c = row.list.choices[i]!;
         const inputs = choiceRows.nth(i).locator('input');
-        await htype(inputs.nth(0), c.name, 120);
-        await htype(inputs.nth(1), c.en, 120);
-        await htype(inputs.nth(2), c.ne, 250);
+        await htype(inputs.nth(0), c.name);
+        await htype(inputs.nth(1), c.en);
+        await htype(inputs.nth(2), c.ne);
       }
     }
-    await hclick(p.getByRole('button', { name: 'Add question', exact: true }), 600);
+    await hclick(p.getByRole('button', { name: 'Add question', exact: true }));
   }
   await expect(p).not.toBeVisible();
   const r = await rowByName(page, row.name);
@@ -448,7 +446,7 @@ async function setRelevance(page: Page, row: Locator, rel: Rel): Promise<void> {
   const ops = await op.locator('option').evaluateAll((els) => els.map((o) => (o as { value: string }).value));
   await hselect(op, ops.includes(wanted) ? wanted : 'selected');
   await hselect(strip.locator('select[title="Pick a value from this field\'s choices"]'), rel.value);
-  await hclick(strip.getByRole('button', { name: 'Apply', exact: true }), 900);
+  await hclick(strip.getByRole('button', { name: 'Apply', exact: true }));
   await expect(strip.locator('.cond-preview').first()).toBeVisible();
   void page;
 }
@@ -462,17 +460,17 @@ async function setHintNe(row: Locator, text: string): Promise<void> {
     .filter({ has: row.page().locator('code.raw-col-tag', { hasText: /^hint::ne$/ }) })
     .locator('input')
     .first();
-  await htype(field, text, 600);
+  await htype(field, text);
 }
 
 async function setMultiline(row: Locator): Promise<void> {
   await showAdvanced(row);
   // The button sits inside a <label>, so its accessible name is the label's text.
   const btn = row.locator('button', { hasText: 'pick widgets' }).first();
-  await hclick(btn, 600);
+  await hclick(btn);
   const modal = row.page().locator('.modal').filter({ hasText: /multiline/ }).last();
-  await hclick(modal.getByRole('checkbox', { name: /^multiline/ }), 600);
-  await hclick(modal.getByRole('button', { name: 'Done' }), 500);
+  await hclick(modal.getByRole('checkbox', { name: /^multiline/ }));
+  await hclick(modal.getByRole('button', { name: 'Done' }));
 }
 
 /* ------------------------------ the take ------------------------------ */
@@ -489,7 +487,7 @@ test('CHO Supervisory Form — built with no code', async ({ page, request, scra
   await htype(card.locator('#new-form-title'), 'CHO Supervisory Form');
   await expect(card.locator('code', { hasText: /^cho_supervisory_form$/ })).toBeVisible();
   await say(page, 'New app form "CHO Supervisory Form" — the file name cho_supervisory_form is derived from the title', 2000);
-  await hclick(card.getByRole('button', { name: 'Create', exact: true }), 800);
+  await hclick(card.getByRole('button', { name: 'Create', exact: true }));
   await expect(card).toBeHidden();
   await expect(page.getByRole('button', { name: /^Survey/ }).first()).toBeVisible({ timeout: 15_000 });
   await hclick(page.getByRole('button', { name: 'Full', exact: true }));
@@ -499,7 +497,7 @@ test('CHO Supervisory Form — built with no code', async ({ page, request, scra
   const bar = page.locator('.language-chip-bar');
   await hclick(bar.getByRole('button', { name: '+ Add language' }));
   const pop = page.locator('.language-chip-popover');
-  await hclick(pop.locator('button', { hasText: 'नेपाली (Nepali)' }), 800);
+  await hclick(pop.locator('button', { hasText: 'नेपाली (Nepali)' }));
   await expect(bar.locator('.language-chip', { hasText: 'नेपाली' })).toBeVisible();
 
   let built = 0;
@@ -528,13 +526,13 @@ test('CHO Supervisory Form — built with no code', async ({ page, request, scra
       }
       // Keep the new row the "current" row so the next one lands after it,
       // and let the viewer read it before moving on.
-      await hclick(r.getByRole('textbox', { name: 'name', exact: true }), 1200);
+      await hclick(r.getByRole('textbox', { name: 'name', exact: true }));
     }
   }
 
   await say(page, `${SECTIONS.length} sections, ${built} rows. Saving…`, 1500);
-  await hclick(page.locator('.page-header').getByRole('button', { name: 'Save', exact: true }), 1500);
-  await hclick(page.locator('.rule-builder-card').getByRole('button', { name: 'Save', exact: true }), 800);
+  await hclick(page.locator('.page-header').getByRole('button', { name: 'Save', exact: true }));
+  await hclick(page.locator('.rule-builder-card').getByRole('button', { name: 'Save', exact: true }));
   await expect(page.locator('.page-header').getByRole('button', { name: 'Saved', exact: true })).toBeVisible({ timeout: 20_000 });
 
   // Read the sheet back through the API and check the picked rules.
