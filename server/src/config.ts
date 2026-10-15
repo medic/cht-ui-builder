@@ -18,6 +18,7 @@
  */
 import os from 'node:os';
 import path from 'node:path';
+import { URL } from 'node:url';
 
 export type ServerMode = 'desktop' | 'hosted';
 
@@ -39,6 +40,42 @@ export const CORS_ORIGINS: string[] = (process.env.CORS_ORIGIN ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+/**
+ * Hosted sign-in is against a CHT instance, the way cht-user-management does
+ * it: a person logs in with their CHT username and password, and is let in if
+ * that instance says they hold every permission in CHT_REQUIRED_PERMISSIONS
+ * (admins always are). Only instances listed here can be logged in against —
+ * otherwise the login form would relay passwords to any URL a caller names.
+ *
+ *   CHT_INSTANCES             comma-separated base URLs, e.g.
+ *                             https://a.dev.medicmobile.org,https://b.dev.medicmobile.org
+ *   CHT_REQUIRED_PERMISSIONS  comma-separated, default can_configure
+ */
+export const CHT_INSTANCES: string[] = parseInstances(process.env.CHT_INSTANCES ?? '');
+
+export const CHT_REQUIRED_PERMISSIONS: string[] = (
+  process.env.CHT_REQUIRED_PERMISSIONS ?? 'can_configure'
+)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+export function parseInstances(raw: string): string[] {
+  const out: string[] = [];
+  for (const part of raw.split(',')) {
+    const s = part.trim();
+    if (!s) continue;
+    const u = new URL(s); // throws on garbage: better at boot than at the first login
+    if (u.protocol !== 'https:' && u.protocol !== 'http:')
+      throw new Error(`CHT_INSTANCES: not http(s): ${s}`);
+    if (u.username || u.password)
+      throw new Error(`CHT_INSTANCES: credentials are not allowed in ${u.host}`);
+    const base = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+    if (!out.includes(base)) out.push(base);
+  }
+  return out;
+}
 
 /** Session lifetime for hosted bearer tokens. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;

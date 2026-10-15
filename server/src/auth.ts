@@ -1,29 +1,40 @@
 /**
  * Identity for hosted mode (docs/plans/hosted-authoring.md §8.2).
  *
- * Durable identity, no roles: an account is an email + password; a session is
- * a random bearer token the client stores and sends on every request. Tokens
- * ride the `Authorization` header — the one place cross-origin cookies would
- * need SameSite=None + credentialed CORS, a header just works. The single
- * exception is the run-output SSE stream: `EventSource` cannot set headers, so
- * that route (and only that route) also accepts `?token=`.
+ * People sign in with their CHT credentials against one of the CHT_INSTANCES,
+ * the way cht-user-management does (chtAuth.ts makes the checks). There is no
+ * sign-up and no password stored here: an account is just (instance, CHT
+ * username), created on first successful login, and its id is derived from
+ * that pair so the same person lands on the same projects every time.
  *
- * Storage is two JSON files under DATA_ROOT/auth. Passwords are scrypt-hashed
- * with a per-user salt; only the sha256 of a token is stored, so the files
- * leaking does not hand out live sessions. Writes are serialised through one
- * promise chain so concurrent sign-ups cannot clobber each other.
+ * A session is a random bearer token the client stores and sends on every
+ * request. Tokens ride the `Authorization` header — the one place cross-origin
+ * cookies would need SameSite=None + credentialed CORS, a header just works.
+ * The single exception is the run-output SSE stream: `EventSource` cannot set
+ * headers, so that route (and only that route) also accepts `?token=`.
+ *
+ * Storage is two JSON files under DATA_ROOT/auth; only the sha256 of a token is
+ * stored, so the files leaking does not hand out live sessions. Writes are
+ * serialised through one promise chain so concurrent logins cannot clobber
+ * each other.
  *
  * Desktop mode has no accounts: the hook stamps every request with the
- * implicit local user and the sign-up / sign-in routes answer 400.
+ * implicit local user and the sign-in route answers 400.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
-import { authDir, LOCAL_USER_ID, MODE, SESSION_TTL_MS } from './config.js';
-
-const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
+import { URL } from 'node:url';
+import { ChtLoginError, loginToCht } from './chtAuth.js';
+import {
+  authDir,
+  CHT_INSTANCES,
+  CHT_REQUIRED_PERMISSIONS,
+  LOCAL_USER_ID,
+  MODE,
+  SESSION_TTL_MS,
+} from './config.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -34,10 +45,12 @@ declare module 'fastify' {
 
 export interface UserRecord {
   id: string;
-  email: string;
-  /** `<saltHex>:<hashHex>` */
-  passwordHash: string;
+  /** CHT instance base URL, one of CHT_INSTANCES at the time of first login. */
+  instance: string;
+  /** CHT username on that instance. */
+  username: string;
   createdAt: string;
+  lastLoginAt: string;
 }
 
 interface UsersFile {
@@ -74,79 +87,68 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.rename(tmp, file);
 }
 
-function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD = 8;
-
-async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-  const hash = await scrypt(password, salt, 64);
-  return `${salt.toString('hex')}:${hash.toString('hex')}`;
-}
-
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [saltHex, hashHex] = stored.split(':');
-  if (!saltHex || !hashHex) return false;
-  const hash = await scrypt(password, Buffer.from(saltHex, 'hex'), 64);
-  const expected = Buffer.from(hashHex, 'hex');
-  return hash.length === expected.length && timingSafeEqual(hash, expected);
-}
-
 function tokenKey(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function newId(prefix: string): string {
-  return `${prefix}_${randomBytes(9).toString('base64url').replace(/[^A-Za-z0-9]/g, '')}`;
+/**
+ * Stable per (instance, username), so re-logging-in finds the same projects.
+ * base64url of a sha256 prefix: within SAFE_ID_RE and safe as a path segment.
+ */
+export function userIdFor(instance: string, username: string): string {
+  return `u_${createHash('sha256').update(`${instance}\n${username}`).digest('base64url').slice(0, 24)}`;
 }
 
 export interface PublicUser {
   id: string;
-  email: string;
+  /** CHT username. */
+  name: string;
+  /** Host of the CHT instance the user signed in against. */
+  instance: string;
 }
 
 function publicUser(u: UserRecord): PublicUser {
-  return { id: u.id, email: u.email };
+  return { id: u.id, name: u.username, instance: new URL(u.instance).host };
 }
 
-export async function signup(
-  emailRaw: string,
-  password: string,
-): Promise<{ user: PublicUser; token: string }> {
-  const email = normaliseEmail(emailRaw);
-  if (!EMAIL_RE.test(email)) throw new AuthError(400, 'Enter a valid email address.');
-  if (typeof password !== 'string' || password.length < MIN_PASSWORD) {
-    throw new AuthError(400, `Password must be at least ${MIN_PASSWORD} characters.`);
-  }
-  const passwordHash = await hashPassword(password);
-  const user = await serialised(async () => {
-    const file = await readJson<UsersFile>(USERS(), { users: [] });
-    if (file.users.some((u) => u.email === email)) {
-      throw new AuthError(409, 'An account with that email already exists. Sign in instead.');
-    }
-    const u: UserRecord = { id: newId('u'), email, passwordHash, createdAt: new Date().toISOString() };
-    file.users.push(u);
-    await writeJson(USERS(), file);
-    return u;
-  });
-  const token = await issueToken(user.id);
-  return { user: publicUser(user), token };
+/** The instances a person may sign in against, for the sign-in form. */
+export function signInInstances(): { url: string; label: string }[] {
+  return CHT_INSTANCES.map((url) => ({ url, label: new URL(url).host }));
 }
 
 export async function login(
-  emailRaw: string,
+  instanceRaw: string,
+  usernameRaw: string,
   password: string,
 ): Promise<{ user: PublicUser; token: string }> {
-  const email = normaliseEmail(emailRaw);
-  const file = await readJson<UsersFile>(USERS(), { users: [] });
-  const user = file.users.find((u) => u.email === email);
-  // Same message either way — do not reveal which emails have accounts.
-  if (!user || !(await verifyPassword(password ?? '', user.passwordHash))) {
-    throw new AuthError(401, 'Email or password is incorrect.');
+  const instance = CHT_INSTANCES.find((i) => i === String(instanceRaw ?? '').replace(/\/+$/, ''));
+  if (!instance) throw new AuthError(400, 'Choose a CHT instance to sign in to.');
+  // CHT usernames are lower case; people type them however they like.
+  const username = String(usernameRaw ?? '')
+    .trim()
+    .toLowerCase();
+  if (!username || typeof password !== 'string' || !password) {
+    throw new AuthError(400, 'Enter your CHT username and password.');
   }
+  try {
+    await loginToCht(instance, username, password, CHT_REQUIRED_PERMISSIONS);
+  } catch (e) {
+    if (e instanceof ChtLoginError) throw new AuthError(e.status, e.message);
+    throw e;
+  }
+  const id = userIdFor(instance, username);
+  const user = await serialised(async () => {
+    const file = await readJson<UsersFile>(USERS(), { users: [] });
+    const now = new Date().toISOString();
+    let u = file.users.find((x) => x.id === id);
+    if (u) u.lastLoginAt = now;
+    else {
+      u = { id, instance, username, createdAt: now, lastLoginAt: now };
+      file.users.push(u);
+    }
+    await writeJson(USERS(), file);
+    return u;
+  });
   const token = await issueToken(user.id);
   return { user: publicUser(user), token };
 }
@@ -178,7 +180,8 @@ export async function userForToken(token: string): Promise<PublicUser | null> {
   const s = sessions.sessions[tokenKey(token)];
   if (!s || Date.now() - s.createdAt > SESSION_TTL_MS) return null;
   const users = await readJson<UsersFile>(USERS(), { users: [] });
-  const u = users.users.find((x) => x.id === s.userId);
+  // Pre-CHT-login records (email + password) have no instance: not a live account.
+  const u = users.users.find((x) => x.id === s.userId && x.instance);
   return u ? publicUser(u) : null;
 }
 
@@ -203,7 +206,12 @@ export function tokenFromRequest(req: FastifyRequest, allowQuery: boolean): stri
 }
 
 /** Routes that must work without a token. */
-const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/signup', '/api/auth/login', '/api/auth/me']);
+const PUBLIC_PATHS = new Set([
+  '/api/health',
+  '/api/auth/instances',
+  '/api/auth/login',
+  '/api/auth/me',
+]);
 /** Routes that may take the token in the query string (EventSource cannot set headers). */
 const QUERY_TOKEN_RE = /^\/api\/cht-conf\/runs\/[^/]+\/stream$/;
 
@@ -228,29 +236,33 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/auth/me', async (req) => {
-    if (MODE === 'desktop') return { mode: MODE, user: { id: LOCAL_USER_ID, email: null } };
+    if (MODE === 'desktop')
+      return { mode: MODE, user: { id: LOCAL_USER_ID, name: null, instance: null } };
     const token = tokenFromRequest(req, false);
     const user = token ? await userForToken(token) : null;
     return { mode: MODE, user };
   });
 
-  app.post<{ Body: { email?: string; password?: string } }>('/api/auth/signup', async (req, reply) => {
-    if (MODE === 'desktop') return reply.code(400).send({ error: 'Accounts are not used in desktop mode.' });
-    try {
-      return await signup(req.body?.email ?? '', req.body?.password ?? '');
-    } catch (e) {
-      return sendAuthError(reply, e);
-    }
-  });
+  app.get('/api/auth/instances', async () => ({
+    instances: MODE === 'hosted' ? signInInstances() : [],
+  }));
 
-  app.post<{ Body: { email?: string; password?: string } }>('/api/auth/login', async (req, reply) => {
-    if (MODE === 'desktop') return reply.code(400).send({ error: 'Accounts are not used in desktop mode.' });
-    try {
-      return await login(req.body?.email ?? '', req.body?.password ?? '');
-    } catch (e) {
-      return sendAuthError(reply, e);
-    }
-  });
+  app.post<{ Body: { instance?: string; username?: string; password?: string } }>(
+    '/api/auth/login',
+    async (req, reply) => {
+      if (MODE === 'desktop')
+        return reply.code(400).send({ error: 'Accounts are not used in desktop mode.' });
+      try {
+        return await login(
+          req.body?.instance ?? '',
+          req.body?.username ?? '',
+          req.body?.password ?? '',
+        );
+      } catch (e) {
+        return sendAuthError(reply, e);
+      }
+    },
+  );
 
   app.post('/api/auth/logout', async (req) => {
     const token = tokenFromRequest(req, false);

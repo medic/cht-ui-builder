@@ -13,7 +13,14 @@ import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CORS_ORIGINS, DATA_ROOT, MODE, SERVE_CLIENT } from './config.js';
+import {
+  CHT_INSTANCES,
+  CHT_REQUIRED_PERMISSIONS,
+  CORS_ORIGINS,
+  DATA_ROOT,
+  MODE,
+  SERVE_CLIENT,
+} from './config.js';
 import { registerAuth } from './auth.js';
 import { registerProjectRoutes } from './routes/project.js';
 import { registerBrowseRoutes } from './routes/browse.js';
@@ -37,6 +44,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.resolve(__dirname, '..', '..', 'client', 'dist');
 
 async function main() {
+  // Hosted sign-in is against a CHT instance; with none configured nobody
+  // could ever sign in, so say so now rather than at the first login.
+  if (MODE === 'hosted' && CHT_INSTANCES.length === 0) {
+    throw new Error(
+      'CHT_UI_MODE=hosted needs CHT_INSTANCES: the CHT instance URL(s) people sign in against.',
+    );
+  }
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 
   await app.register(cors, {
@@ -84,6 +98,11 @@ async function main() {
 
   await app.listen({ port: PORT, host: HOST });
   app.log.info(`UI Builder server (${MODE} mode, data at ${DATA_ROOT}) listening on http://${HOST}:${PORT}`);
+  if (MODE === 'hosted') {
+    app.log.info(
+      `sign-in: ${CHT_INSTANCES.join(', ')} · requires ${CHT_REQUIRED_PERMISSIONS.join(', ') || '(no permissions)'}`,
+    );
+  }
 }
 
 main().catch((err) => {

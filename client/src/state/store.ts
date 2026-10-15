@@ -37,7 +37,8 @@ export type ServerMode = 'desktop' | 'hosted';
 /** Who the server thinks we are, and which mode it runs in. */
 export interface SessionState {
   mode: ServerMode;
-  user: { id: string; email: string | null } | null;
+  /** `name` is the CHT username, `instance` the CHT host; both null in desktop mode. */
+  user: { id: string; name: string | null; instance: string | null } | null;
 }
 
 export interface ProjectInfo {

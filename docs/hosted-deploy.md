@@ -4,7 +4,7 @@ The same codebase runs two ways (`server/src/config.ts`):
 
 | | desktop (default) | hosted (`CHT_UI_MODE=hosted`) |
 |---|---|---|
-| who | one implicit local user | accounts: email + password, bearer tokens |
+| who | one implicit local user | CHT users: sign in with CHT credentials against `CHT_INSTANCES` (as cht-user-management does), bearer tokens |
 | projects | any folder on this machine, opened by path or the folder browser | created, imported or cloned into `DATA_ROOT/users/<user>/projects/` |
 | state | `~/.cht-ui-builder/` | `DATA_ROOT` (default `/data`) — a volume |
 | filesystem browsing | yes | not registered |
@@ -14,8 +14,10 @@ The same codebase runs two ways (`server/src/config.ts`):
 
 ```sh
 docker build -t cht-ui-builder .
-docker run -d --name cht-ui -p 5174:5174 -v cht-ui-data:/data cht-ui-builder
-# open http://localhost:5174 — sign up, start blank or from a template
+docker run -d --name cht-ui -p 5174:5174 -v cht-ui-data:/data \
+  -e CHT_INSTANCES=https://my-cht.dev.medicmobile.org cht-ui-builder
+# open http://localhost:5174 — sign in with a CHT user, start blank or from a template
+# (no CHT to hand? `node scripts/fake-cht.mjs` and CHT_INSTANCES=http://host.docker.internal:5995)
 ```
 
 The image holds node 22, python + pyxform, git, cht-conf and the built client,
@@ -66,7 +68,7 @@ nothing beyond that.
 
 ## What a hosted user can do
 
-sign up → start blank / template / import (git URL or zip) → edit forms,
+sign in with CHT credentials → start blank / template / import (git URL or zip) → edit forms,
 hierarchy, tasks, contact-summary → **Deploy** panel: `compile-app-settings`,
 `convert-app-forms`, `validate-app-forms` and the other offline cht-conf
 actions run inside the container → overview: **Download zip**, or **Push
@@ -78,9 +80,18 @@ server. The user deploys the downloaded project with their own `cht-conf`.
 
 ## Accounts and data
 
-- Accounts: `DATA_ROOT/auth/users.json` (scrypt password hashes) and
-  `sessions.json` (sha256 of tokens, 30-day expiry). No email verification, no
-  password reset — this is a test platform. Delete a row to revoke.
+- Sign-in: `server/src/chtAuth.ts`. The person picks one of `CHT_INSTANCES`
+  and enters their CHT username and password; the server checks them with
+  `POST /_session`, reads their roles (`medic/org.couchdb.user:<name>`) and the
+  instance's permissions (`/api/v1/settings`), and lets them in if they are an
+  admin or hold every permission in `CHT_REQUIRED_PERMISSIONS` (default
+  `can_configure`) — the checks cht-user-management makes. The CHT session is
+  closed straight after; no CHT password or cookie is stored.
+- Accounts: `DATA_ROOT/auth/users.json` holds (instance, username) per CHT user,
+  created on first sign-in, with an id derived from that pair so the same
+  person always lands on the same projects. `sessions.json` holds sha256 of
+  tokens, 30-day expiry. Delete a session row to sign someone out; losing CHT
+  access stops new sign-ins but not a live session.
 - Each user: `DATA_ROOT/users/<id>/registry.json` and `projects/<slug>/`.
 - A user can only ever resolve project ids in their own registry; a path outside
   their projects dir is refused even if the registry says otherwise.

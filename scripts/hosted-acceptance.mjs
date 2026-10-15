@@ -3,7 +3,9 @@
  * at the API level. Spawns the built server twice — once per mode — against
  * throwaway data dirs, then drives it with fetch:
  *
- *   hosted   two users sign up; A starts blank and adds a form; B imports the
+ *   hosted   two users sign in with CHT credentials against scripts/fake-cht.mjs
+ *            (wrong password, missing permission and unlisted instance are
+ *            refused; signup is gone); A starts blank and adds a form; B imports the
  *            mini-config fixture as a zip; A cannot list, open or read B's
  *            project by any route; both projects answer independently (two
  *            tabs, two projects); B exports a zip; a zip-slip entry is refused;
@@ -21,6 +23,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startFakeCht } from './fake-cht.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -42,9 +45,9 @@ function check(cond, label, extra = '') {
   }
 }
 
-async function startServer(mode, dataRoot, port) {
+async function startServer(mode, dataRoot, port, extraEnv = {}) {
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, CHT_UI_MODE: mode, DATA_ROOT: dataRoot, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'warn' },
+    env: { ...process.env, CHT_UI_MODE: mode, DATA_ROOT: dataRoot, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'warn', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -105,20 +108,35 @@ function zipOfFixture(rootName) {
 
 async function hosted() {
   const data = mkdtempSync(path.join(os.tmpdir(), 'cht-ui-hosted-'));
-  const srv = await startServer('hosted', data, 5291);
+  const cht = await startFakeCht();
+  const srv = await startServer('hosted', data, 5291, { CHT_INSTANCES: cht.url });
   try {
     const anon = client(srv.base);
     check((await anon.json('GET', '/api/projects')).status === 401, 'hosted: unauthenticated request is 401');
     check((await anon.json('GET', '/api/browse/shortcuts')).status === 401, 'hosted: browse is not reachable unauthenticated');
     check((await anon.json('GET', '/api/auth/me')).data.mode === 'hosted', 'hosted: /api/auth/me reports the mode');
 
-    const a = await anon.json('POST', '/api/auth/signup', { email: 'a@example.org', password: 'password-a' });
-    check(a.status === 200 && a.data.token, 'user A signs up');
-    check((await anon.json('POST', '/api/auth/signup', { email: 'A@Example.org', password: 'password-a' })).status === 409, 'duplicate email (case-insensitive) is 409');
-    check((await anon.json('POST', '/api/auth/login', { email: 'a@example.org', password: 'wrong-wrong' })).status === 401, 'wrong password is 401');
-    check((await anon.json('POST', '/api/auth/signup', { email: 'c@example.org', password: 'short' })).status === 400, 'short password is refused');
-    const b = await anon.json('POST', '/api/auth/signup', { email: 'b@example.org', password: 'password-b' });
-    check(b.status === 200 && b.data.token, 'user B signs up');
+    const inst = await anon.json('GET', '/api/auth/instances');
+    check(inst.status === 200 && inst.data.instances.length === 1 && inst.data.instances[0].url === cht.url, 'hosted: sign-in instances are listed without a token');
+    const login = (username, password, instance = cht.url) => anon.json('POST', '/api/auth/login', { instance, username, password });
+
+    const a = await login('alice', 'alice-pass');
+    check(a.status === 200 && a.data.token && a.data.user.name === 'alice', 'user A signs in with CHT credentials', JSON.stringify(a.data));
+    check(!JSON.stringify(a.data).includes('pass'), 'no password comes back');
+    const a2 = await login('Alice', 'alice-pass');
+    check(a2.status === 200 && a2.data.user.id === a.data.user.id, 'signing in again (any case) is the same account');
+    check((await login('alice', 'wrong-wrong')).status === 401, 'wrong CHT password is 401');
+    const chw = await login('chw', 'chw-pass');
+    check(chw.status === 403 && /can_configure/.test(chw.data.error), 'CHT user without can_configure is 403 and told why', JSON.stringify(chw.data));
+    check((await login('alice', 'alice-pass', 'https://evil.example.org')).status === 400, 'an instance outside CHT_INSTANCES is refused (no password relay)');
+    check((await anon.json('POST', '/api/auth/signup', { email: 'a@example.org', password: 'password-a' })).status === 401, 'signup is gone (unknown route, behind auth)');
+    const admin = await login('admin', 'admin-pass');
+    check(admin.status === 200, 'a CHT server admin (no user-settings doc) signs in');
+    const b = await login('bob', 'bob-pass');
+    check(b.status === 200 && b.data.token, 'user B signs in');
+    check(b.data.user.id !== a.data.user.id, 'A and B are different accounts');
+    const me = await client(srv.base, a.data.token).json('GET', '/api/auth/me');
+    check(me.data.user?.name === 'alice' && me.data.user?.instance === new URL(cht.url).host, '/api/auth/me names the CHT user and instance');
 
     const A = client(srv.base, a.data.token);
     const B = client(srv.base, b.data.token);
@@ -184,6 +202,7 @@ async function hosted() {
     check(!aProjects.some((d) => d.startsWith('flood-response')), 'deleted project folder is gone from disk');
   } finally {
     srv.child.kill();
+    await cht.close();
     rmSync(data, { recursive: true, force: true });
   }
 }

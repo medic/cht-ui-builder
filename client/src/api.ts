@@ -114,7 +114,14 @@ export const UNAUTHORIZED_EVENT = 'cht-ui-builder:unauthorized';
 
 export interface SessionInfo {
   mode: ServerMode;
-  user: { id: string; email: string | null } | null;
+  /** `name` is the CHT username and `instance` the CHT host (null in desktop mode). */
+  user: SessionUser | null;
+}
+
+export interface SessionUser {
+  id: string;
+  name: string | null;
+  instance: string | null;
 }
 
 export interface ProjectListEntry {
@@ -138,17 +145,19 @@ export const api = {
 
   me: () => jsonFetch<SessionInfo>('/api/auth/me'),
 
-  signup: (email: string, password: string) =>
-    jsonFetch<{ user: { id: string; email: string }; token: string }>('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+  /** The CHT instances hosted sign-in accepts (CHT_INSTANCES on the server). */
+  signInInstances: () =>
+    jsonFetch<{ instances: { url: string; label: string }[] }>('/api/auth/instances'),
 
-  login: (email: string, password: string) =>
-    jsonFetch<{ user: { id: string; email: string }; token: string }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+  /** Sign in with CHT credentials against one of `signInInstances()`. */
+  login: (instance: string, username: string, password: string) =>
+    jsonFetch<{ user: { id: string; name: string; instance: string }; token: string }>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ instance, username, password }),
+      },
+    ),
 
   logout: () => jsonFetch<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
 
@@ -617,11 +626,7 @@ export const api = {
    *  `updateProperty` on the server, so every unedited line stays
    *  byte-identical on disk. `dir` disambiguates when the same locale exists
    *  in both `translations/` and `app_settings/forms/translations/`. */
-  putTranslations: (
-    locale: string,
-    updates: Array<{ key: string; value: string }>,
-    dir?: string,
-  ) =>
+  putTranslations: (locale: string, updates: Array<{ key: string; value: string }>, dir?: string) =>
     jsonFetch<{ ok: true; path: string }>(
       `/api/translations/${encodeURIComponent(locale)}${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`,
       {

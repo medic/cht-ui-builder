@@ -75,9 +75,9 @@ mount point. It does not make the storage durable; §2 does.
 
 ### Environment variables
 
-The first five are set by the image and need no action. The last three have
-defaults in `server/src/config.ts` and are **not** in the Dockerfile, so
-reading the Dockerfile alone will not reveal them.
+The first five are set by the image and need no action. `CHT_INSTANCES` must
+be set by you. The rest have defaults in `server/src/config.ts` and are **not**
+in the Dockerfile, so reading the Dockerfile alone will not reveal them.
 
 | Variable | Value | Set by image | Notes |
 |---|---|---|---|
@@ -86,6 +86,8 @@ reading the Dockerfile alone will not reveal them.
 | `PORT` | `5174` | yes | |
 | `HOST` | `0.0.0.0` | yes | Already the default in hosted mode. |
 | `SERVE_CLIENT` | `1` | yes | Serves the web UI from this process. Keep it — it is why there is no CORS configuration. |
+| `CHT_INSTANCES` | *(none)* | no | **Required in hosted mode** — the server refuses to start without it. Comma-separated base URLs of the CHT instance(s) people sign in against with their CHT credentials. Only these are ever contacted for sign-in. |
+| `CHT_REQUIRED_PERMISSIONS` | `can_configure` | no | Comma-separated CHT permissions a user's roles must hold to sign in. CHT admins always may. |
 | `CORS_ORIGIN` | *(unset)* | no | Only if the UI is served from a different origin, which it is not by default. Exact-match, comma-separated; no wildcards. |
 | `IMPORT_MAX_BYTES` | default 100 MB | no | Per-project limit on git/zip import. |
 | `LOG_LEVEL` | `info` | no | pino levels. |
@@ -97,7 +99,7 @@ reading the Dockerfile alone will not reveal them.
 **Storage.** Everything lives under `DATA_ROOT`:
 
 ```
-<DATA_ROOT>/auth/users.json                  accounts (scrypt password hashes)
+<DATA_ROOT>/auth/users.json                  accounts: (CHT instance, username), no passwords
 <DATA_ROOT>/auth/sessions.json               session token hashes, 30-day expiry
 <DATA_ROOT>/users/<userId>/registry.json     that user's project list
 <DATA_ROOT>/users/<userId>/projects/<slug>/  one project tree per project
@@ -159,9 +161,10 @@ curl -s https://<host>/api/health
 # 2. Confirm the filesystem browser is ABSENT, not merely guarded.
 #    Unauthenticated requests return 401 because the auth hook runs before
 #    routing, so this check is only meaningful WITH a token.
-TOKEN=$(curl -s -X POST https://<host>/api/auth/signup \
+#    Sign in as a CHT user that holds CHT_REQUIRED_PERMISSIONS.
+TOKEN=$(curl -s -X POST https://<host>/api/auth/login \
   -H 'content-type: application/json' \
-  -d '{"email":"deploy-check@example.org","password":"<pw>"}' | jq -r .token)
+  -d '{"instance":"<one of CHT_INSTANCES>","username":"<cht user>","password":"<pw>"}' | jq -r .token)
 
 curl -s -o /dev/null -w 'browse       %{http_code}\n' \
   -H "Authorization: Bearer $TOKEN" https://<host>/api/browse
@@ -176,7 +179,7 @@ hosted mode — stop and correct `CHT_UI_MODE` before anyone is given the URL.
 (Verified behaviour: hosted returns 404; any other mode returns 200, so this
 check genuinely discriminates.)
 
-Then, in a browser: sign up, create a project from a template, open the Deploy
+Then, in a browser: sign in with a CHT user, create a project from a template, open the Deploy
 panel and start a compile. The log must stream line by line. If it only appears
 when the run completes, response buffering is still on somewhere — see §5.
 
@@ -208,12 +211,15 @@ Two things the Dockerfile does not say:
 Current, deliberate properties. State them to whoever signs off on the
 deployment.
 
-- **Signup is open.** Email and password, with **no email verification, no
-  password reset and no invite mechanism**. Anyone who can reach the URL can
-  create an account. Put authentication in front of it unless the endpoint is
-  on a private network.
+- **Sign-in is with CHT credentials; there is no sign-up.** Only users of a
+  `CHT_INSTANCES` instance whose roles hold `CHT_REQUIRED_PERMISSIONS` (or who
+  are CHT admins) get in — access is managed in CHT, as for
+  cht-user-management. Their passwords transit this server on sign-in (it
+  relays them to `<instance>/_session`, never to any other host) and are not
+  stored. A session lasts 30 days and is not re-checked against CHT, so
+  revoking someone's CHT access takes effect at their next sign-in.
 - **No third-party credentials are stored.** A compromise of `DATA_ROOT`
-  exposes scrypt password hashes and users' project files, but grants no
+  exposes CHT usernames and users' project files, but no passwords and no
   external access. `DeployConfig` (`server/src/state.ts`) has no password
   field; CHT passwords are per-request only.
 - **But credentials do transit the server, and outbound calls are not
