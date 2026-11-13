@@ -79,9 +79,9 @@ export function App() {
         if (res.open && res.project) {
           session.setProjectId(res.projectId ?? res.project.id);
           setProject(res.project);
-        } else if (res.error) {
+        } else {
           session.setProjectId(null);
-          setError(res.error);
+          if (res.error) setError(res.error);
         }
       })
       .catch((e: Error) => {
