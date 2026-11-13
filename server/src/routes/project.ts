@@ -193,12 +193,10 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     const entry = await projectEntryFor(req);
     if (!entry) return { open: false };
     if (!(await fileExists(entry.path))) {
+      if (MODE === 'desktop') return { open: false };
       return {
         open: false,
-        error:
-          MODE === 'desktop'
-            ? `project folder no longer exists: ${entry.path}`
-            : 'project folder no longer exists',
+        error: 'project folder no longer exists',
       };
     }
     // eslint-disable-next-line no-undef

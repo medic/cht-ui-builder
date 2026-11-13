@@ -3245,6 +3245,7 @@ button.danger:hover:not(:disabled) { background: #991b1b; }
 .project-picker .card.wide { max-width: 760px; }
 .project-picker section { margin-top: 24px; }
 .project-picker section h2 { font-size: 15px; margin: 0 0 8px; }
+.picker-missing-actions { margin-bottom: 8px; }
 .picker-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .picker-user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; white-space: nowrap; }
 .project-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 6px; }

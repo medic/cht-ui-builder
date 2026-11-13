@@ -28,6 +28,8 @@ export function ProjectPicker() {
   const [browsing, setBrowsing] = useState(false);
   const [wizard, setWizard] = useState<null | { template?: string }>(null);
   const [importing, setImporting] = useState<null | 'git' | 'zip'>(null);
+  const [forgettingMissing, setForgettingMissing] = useState(false);
+  const missingProjects = projects?.filter((p) => !p.exists) ?? [];
 
   const refresh = useCallback(async () => {
     try {
@@ -87,6 +89,29 @@ export function ProjectPicker() {
     }
   }
 
+  async function forgetAllMissing() {
+    if (hosted || missingProjects.length === 0) return;
+    const count = missingProjects.length;
+    const ok = window.confirm(
+      `Forget all ${count} missing project${count === 1 ? '' : 's'}?\n\nThis only removes these entries from your project list. It does not delete any project files.`,
+    );
+    if (!ok) return;
+
+    setForgettingMissing(true);
+    setError(null);
+    try {
+      for (const project of missingProjects) {
+        await api.deleteProject(project.id, false);
+      }
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+      await refresh();
+    } finally {
+      setForgettingMissing(false);
+    }
+  }
+
   async function signOut() {
     try {
       await api.logout();
@@ -122,6 +147,19 @@ export function ProjectPicker() {
 
         <section>
           <h2>Your projects</h2>
+          {!hosted && missingProjects.length > 0 && (
+            <div className="picker-missing-actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || forgettingMissing}
+                onClick={() => void forgetAllMissing()}
+                title="Remove missing entries from this list only; no project files are deleted."
+              >
+                {forgettingMissing ? 'Forgetting missing…' : 'Forget all missing'}
+              </button>
+            </div>
+          )}
           {projects === null && <p className="muted">Loading…</p>}
           {projects !== null && projects.length === 0 && (
             <p className="muted">
@@ -150,6 +188,7 @@ export function ProjectPicker() {
                   <button
                     type="button"
                     className="link danger small"
+                    disabled={forgettingMissing}
                     onClick={() => void forget(p)}
                     title={hosted ? 'Delete this project from the server' : 'Remove from this list'}
                   >
